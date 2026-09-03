@@ -82,7 +82,7 @@ public static class LlmCredentialRoutes
             ILlmCredentialService service,
             HttpContext ctx,
             CancellationToken ct) =>
-            Results.Ok(await service.SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), ct).ConfigureAwait(false)))
+            Results.Ok(await service.SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, ct).ConfigureAwait(false)))
             .WithName("SetWorkspaceLlmPolicy");
 
         return group;
@@ -101,4 +101,5 @@ public sealed record RegisterLlmCredentialRequest(
     bool IsDefault = false);
 
 public sealed record RotateLlmCredentialRequest(string Secret);
-public sealed record SetLlmPolicyRequest(bool AllowPlatformFallback);
+/// <param name="AllowedTools">Null leaves the tool allowlist unchanged; an empty array offers the model no tools.</param>
+public sealed record SetLlmPolicyRequest(bool AllowPlatformFallback, IReadOnlyList<string>? AllowedTools = null);

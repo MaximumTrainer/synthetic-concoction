@@ -68,11 +68,15 @@ public sealed record LlmCredentialSummary(
     DateTimeOffset? LastUsedAt,
     DateTimeOffset? RevokedAt);
 
-/// <summary>Per-workspace opt-in controlling whether the operator's platform credential may be used.</summary>
+/// <summary>
+/// Per-workspace agent policy: whether the operator's platform credential may be used, and which tools the model
+/// may be offered. <see cref="AllowedTools"/> null means every registered tool; an empty list means none.
+/// </summary>
 public sealed record WorkspaceLlmPolicy(
     Guid WorkspaceId,
     bool AllowPlatformFallback,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<string>? AllowedTools = null);
 
 public sealed record LlmCredentialValidationResult(
     Guid CredentialId,

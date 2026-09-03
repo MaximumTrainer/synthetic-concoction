@@ -20,6 +20,7 @@ public sealed class AgentChatTurnTests
     private readonly ScriptedClient _client = new();
     private readonly LlmOptions _options = new() { MaxToolIterations = 3, HistoryWindow = 20 };
     private readonly HeuristicTokenBudgetEstimator _estimator = new();
+    private readonly InMemoryLlmCredentialStore _policyStore = new();
     private readonly RecordingTool _echoTool = new("echo");
     private readonly AgentChatService _chat;
 
@@ -35,7 +36,33 @@ public sealed class AgentChatTurnTests
             new Dictionary<string, string>(), LlmCredentialSource.WorkspaceDefault);
 
         _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
-            new FixedResolver(credential), new FixedFactory(_client), _estimator, _options);
+            new FixedResolver(credential), new FixedFactory(_client), _estimator, _policyStore, _options);
+    }
+
+    [Fact]
+    public async Task WorkspacePolicyAllowlist_RestrictsToolsOffered_AndBlocksExecution()
+    {
+        var (wsId, userId, session) = await CreateSessionAsync();
+        await _policyStore.SavePolicyAsync(new WorkspaceLlmPolicy(wsId, false, DateTimeOffset.UtcNow, ["echo"]));
+        _client.Enqueue(ToolCall("dangerous", "{}"));
+        _client.Enqueue(Text("done"));
+
+        var turn = await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "go"));
+
+        _client.Requests[0].Tools.Select(t => t.Name).Should().Equal(["echo"], "the persisted policy narrows the registry's tools");
+        turn.ToolInvocations.Should().ContainSingle().Which.Status.Should().Be(ToolInvocationStatus.Failed);
+    }
+
+    [Fact]
+    public async Task WorkspacePolicyWithEmptyAllowlist_OffersNoTools()
+    {
+        var (wsId, userId, session) = await CreateSessionAsync();
+        await _policyStore.SavePolicyAsync(new WorkspaceLlmPolicy(wsId, false, DateTimeOffset.UtcNow, []));
+        _client.Enqueue(Text("ok"));
+
+        await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "hi"));
+
+        _client.Requests[0].Tools.Should().BeEmpty();
     }
 
     private async Task<(Guid wsId, Guid userId, ChatSession session)> CreateSessionAsync(ChatMode mode = ChatMode.Autonomous)
@@ -262,7 +289,7 @@ public sealed class AgentChatTurnTests
     {
         var (_, userId, session) = await CreateSessionAsync();
         var chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
-            new FixedResolver(null), new FixedFactory(_client), _estimator, _options);
+            new FixedResolver(null), new FixedFactory(_client), _estimator, _policyStore, _options);
 
         var turn = await chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "hello"));
         turn.AssistantMessage!.Content.Should().Contain("No LLM credential is configured");

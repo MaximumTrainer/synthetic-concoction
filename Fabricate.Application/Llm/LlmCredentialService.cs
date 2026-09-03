@@ -150,16 +150,22 @@ public sealed class LlmCredentialService(
             ?? new WorkspaceLlmPolicy(workspaceId, false, DateTimeOffset.MinValue);
     }
 
-    public async Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, CancellationToken cancellationToken = default)
+    public async Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, CancellationToken cancellationToken = default)
     {
         var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
-        var policy = await store.SavePolicyAsync(new WorkspaceLlmPolicy(workspaceId, allowPlatformFallback, DateTimeOffset.UtcNow), cancellationToken).ConfigureAwait(false);
+
+        var existing = await store.GetPolicyAsync(workspaceId, cancellationToken).ConfigureAwait(false);
+        var tools = allowedTools is null
+            ? existing?.AllowedTools
+            : allowedTools.Select(t => t.Trim()).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+        var policy = await store.SavePolicyAsync(new WorkspaceLlmPolicy(workspaceId, allowPlatformFallback, DateTimeOffset.UtcNow, tools), cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), workspace.AccountId, requestingUserId,
             "llm_policy.updated", "Workspace", workspaceId.ToString(),
             Guid.NewGuid().ToString(), DateTimeOffset.UtcNow,
-            $"allowPlatformFallback={allowPlatformFallback}"), cancellationToken).ConfigureAwait(false);
+            $"allowPlatformFallback={allowPlatformFallback};allowedTools={(tools is null ? "all" : string.Join(",", tools))}"), cancellationToken).ConfigureAwait(false);
 
         return policy;
     }

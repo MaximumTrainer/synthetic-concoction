@@ -159,6 +159,11 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
         modelBuilder.Entity<WorkspaceLlmPolicy>(e =>
         {
             e.HasKey(p => p.WorkspaceId);
+            // Null (column NULL) means every registered tool; an empty JSON array means none.
+            e.Property(p => p.AllowedTools)
+                .HasConversion(
+                    v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null));
         });
     }
 }

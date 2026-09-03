@@ -14,9 +14,24 @@ public sealed class AgentChatService(
     ILlmCredentialResolver credentialResolver,
     IChatCompletionClientFactory clientFactory,
     ITokenBudgetEstimator tokenEstimator,
+    ILlmCredentialStore policyStore,
     LlmOptions options) : IAgentChatService
 {
     private const string ToolCommandPrefix = "/tool ";
+
+    /// <summary>
+    /// Tools the workspace may use: the registry's (code-level) allowlist intersected with the persisted workspace
+    /// policy, when one names tools. Both are enforced server-side; nothing in a prompt can widen this set.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> GetAllowedToolsAsync(Guid workspaceId, CancellationToken cancellationToken)
+    {
+        var registered = toolRegistry.AllowedTools(workspaceId);
+        var policy = await policyStore.GetPolicyAsync(workspaceId, cancellationToken).ConfigureAwait(false);
+        if (policy?.AllowedTools is null)
+            return registered;
+
+        return registered.Where(t => policy.AllowedTools.Contains(t, StringComparer.OrdinalIgnoreCase)).ToArray();
+    }
 
     public async Task<ChatSession> CreateSessionAsync(CreateChatSessionCommand command, CancellationToken cancellationToken = default)
     {
@@ -207,7 +222,7 @@ public sealed class AgentChatService(
         }
 
         var client = clientFactory.Create(credential);
-        var allowedTools = toolRegistry.AllowedTools(session.WorkspaceId);
+        var allowedTools = await GetAllowedToolsAsync(session.WorkspaceId, cancellationToken).ConfigureAwait(false);
         var toolDefinitions = client.Capabilities.SupportsToolCalling
             ? allowedTools.Select(toolRegistry.Resolve).Where(t => t is not null)
                 .Select(t => new LlmToolDefinition(t!.Name, t.Description, t.InputSchemaJson)).ToArray()
@@ -402,7 +417,7 @@ public sealed class AgentChatService(
         var running = invocation with { Status = ToolInvocationStatus.Running, StartedAt = DateTimeOffset.UtcNow };
         await sessionRepository.SaveInvocationAsync(running, cancellationToken).ConfigureAwait(false);
 
-        var allowed = toolRegistry.AllowedTools(session.WorkspaceId);
+        var allowed = await GetAllowedToolsAsync(session.WorkspaceId, cancellationToken).ConfigureAwait(false);
         var tool = allowed.Contains(invocation.ToolName, StringComparer.OrdinalIgnoreCase) ? toolRegistry.Resolve(invocation.ToolName) : null;
 
         string outputJson;
