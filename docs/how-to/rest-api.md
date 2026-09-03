@@ -392,9 +392,11 @@ Create a new chat session.
 
 ---
 
-### POST /chat/sessions/{id}/messages
+### POST /workspaces/{workspaceId}/chat/sessions/{id}/messages
 
-Send a message to a chat session.
+Send a message. The whole turn runs before the response returns: the message is persisted, the configured model is
+called with the composed instructions, history and the workspace's allowed tools, any tool calls the model makes are
+executed and fed back (up to `FABRICATE_LLM_MAX_TOOL_ITERATIONS` rounds), and the final reply is persisted.
 
 **Request:**
 
@@ -402,17 +404,79 @@ Send a message to a chat session.
 { "content": "Discover the schema for this database." }
 ```
 
-**Response 200:**
+**Response 200** — the turn:
 
 ```json
 {
-  "id": "msg-001",
-  "sessionId": "sess-001",
-  "role": "assistant",
-  "content": "I found 3 tables: users, orders, order_items. Here are the details...",
-  "createdAt": "2024-06-01T10:00:01Z"
+  "userMessage":      { "id": "msg-001", "role": "User", "content": "Discover the schema…", "createdAt": "…" },
+  "assistantMessage": { "id": "msg-003", "role": "Assistant", "content": "I found 3 tables: users, orders, order_items…", "createdAt": "…" },
+  "toolInvocations": [
+    { "id": "inv-001", "toolName": "discover_schema", "inputJson": "{}", "outputJson": "{…}", "status": "Succeeded", "startedAt": "…", "completedAt": "…" }
+  ],
+  "usage": { "inputTokens": 1210, "outputTokens": 342, "totalTokens": 1552 },
+  "stopReason": "EndTurn"
 }
 ```
+
+`stopReason` is `Refusal` when the provider declined, and `Error` when the provider call failed; in both cases
+`assistantMessage` is a `System`-role notice and no exception is raised. When the workspace has no LLM credential the
+notice explains how to register one — see [Bring your own LLM key](byok-llm-credentials.md). Messages starting with
+`/tool <name> <json>` bypass the model and run the tool directly.
+
+Session modes: `Guided` (the model explains before acting), `Autonomous` (tools run without confirmation),
+`ReviewRequired` (tool calls are parked as `Pending` until approved — see below).
+
+---
+
+### POST /workspaces/{workspaceId}/chat/sessions/{id}/messages/stream
+
+Same as above, streamed as server-sent events. One `event:`/`data:` pair per event, terminated by `completed`:
+
+```
+event: delta
+data: {"text":"I found "}
+
+event: tool_completed
+data: {"id":"inv-001","toolName":"discover_schema","status":"Succeeded",…}
+
+event: completed
+data: {"userMessage":…,"assistantMessage":…,"toolInvocations":[…],"usage":…,"stopReason":"EndTurn"}
+```
+
+Other events: `tool_requested` (a call parked for approval) and `notice`.
+
+---
+
+### GET /workspaces/{workspaceId}/chat/sessions/{id}/tool-invocations
+
+Every tool invocation for the session, oldest first.
+
+---
+
+### POST /workspaces/{workspaceId}/chat/sessions/{id}/tool-invocations/{invocationId}/approve
+
+Runs a `Pending` invocation from a `ReviewRequired` session. Requires the workspace **Editor** role or above.
+Returns the completed invocation.
+
+---
+
+## LLM Credentials
+
+Bring-your-own-key credentials scoped to a workspace. Every response is a redacted summary (fingerprint and last four
+characters — never the secret). Register, rotate, revoke and policy changes require the workspace **Admin** role;
+list and validate need any role. Full guide: [Bring your own LLM key](byok-llm-credentials.md).
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/workspaces/{workspaceId}/llm-credentials` | Register. Body: `name`, `provider`, `model`, `secret`, optional `kind`, `endpoint`, `projectId`, `nonSecretSettings`, `isDefault`. Returns `201` + summary. |
+| `GET` | `/workspaces/{workspaceId}/llm-credentials` | List summaries. |
+| `POST` | `/workspaces/{workspaceId}/llm-credentials/{id}/rotate` | Body: `{ "secret": "…" }`. |
+| `POST` | `/workspaces/{workspaceId}/llm-credentials/{id}/validate` | Minimal provider probe; rate-limited to 10/min. Returns `{ isValid, message, checkedAt }`. |
+| `DELETE` | `/workspaces/{workspaceId}/llm-credentials/{id}` | Soft revoke. `204`. |
+| `GET` | `/workspaces/{workspaceId}/llm-credentials/policy` | `{ allowPlatformFallback }` |
+| `PUT` | `/workspaces/{workspaceId}/llm-credentials/policy` | Body: `{ "allowPlatformFallback": true }` |
+
+A credential id from another workspace returns `404`.
 
 ---
 

@@ -27,9 +27,10 @@ public sealed class EfSessionRepository(FabricateDbContext db) : ISessionReposit
         return message;
     }
 
+    // CreatedAt is persisted as UTC ticks, so ordering by it is chronological; ordering by the Guid key is not.
     public async Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid sessionId, int skip, int take, CancellationToken cancellationToken = default)
         => await db.ChatMessages.Where(m => m.SessionId == sessionId)
-            .OrderBy(m => m.Id).Skip(skip).Take(take).ToListAsync(cancellationToken);
+            .OrderBy(m => m.CreatedAt).Skip(skip).Take(take).ToListAsync(cancellationToken);
 
     public async Task<ToolInvocation> SaveInvocationAsync(ToolInvocation invocation, CancellationToken cancellationToken = default)
     {
@@ -39,4 +40,11 @@ public sealed class EfSessionRepository(FabricateDbContext db) : ISessionReposit
         await db.SaveChangesAsync(cancellationToken);
         return invocation;
     }
+
+    public Task<ToolInvocation?> GetInvocationAsync(Guid invocationId, CancellationToken cancellationToken = default)
+        => db.ToolInvocations.FindAsync([invocationId], cancellationToken).AsTask();
+
+    public async Task<IReadOnlyList<ToolInvocation>> ListInvocationsAsync(Guid sessionId, CancellationToken cancellationToken = default)
+        => await db.ToolInvocations.Where(i => i.SessionId == sessionId)
+            .OrderBy(i => i.StartedAt).ToListAsync(cancellationToken);
 }

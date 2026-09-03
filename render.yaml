@@ -1,0 +1,43 @@
+# Render blueprint — documented alternative to the Fly.io reference deployment (#61).
+# Deploy with "New → Blueprint" pointing at this repository. Secrets marked `sync: false` are prompted for in the
+# dashboard and never stored in the repository.
+services:
+  - type: web
+    name: fabricate-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://+:8080
+      - key: FABRICATE_DB_PROVIDER
+        value: postgres
+      - key: FABRICATE_CONNECTION_STRING
+        fromDatabase:
+          name: fabricate-db
+          property: connectionString
+      - key: FABRICATE__BootstrapApiKey
+        sync: false
+      - key: FABRICATE_LLM_PROVIDER
+        value: anthropic
+      - key: FABRICATE_LLM_MODEL
+        value: claude-opus-5
+      - key: FABRICATE_LLM_ALLOWED_MODELS
+        value: claude-opus-5,claude-sonnet-5
+      - key: FABRICATE_LLM_API_KEY_SECRET
+        value: ANTHROPIC_API_KEY
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: FABRICATE_LLM_PLATFORM_FALLBACK
+        value: always
+      - key: FABRICATE_DATA_PROTECTION_KEYS_PATH
+        value: /app/keys
+
+databases:
+  - name: fabricate-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"

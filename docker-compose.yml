@@ -1,0 +1,45 @@
+# Local / self-hosted Fabricate: API + PostgreSQL in one command (#60 §6, #61 §8).
+#
+#   cp .env.example .env      # fill in FABRICATE__BootstrapApiKey and your LLM key
+#   docker compose up --build
+#
+# The shape matches the hosted deployments (PostgreSQL, secrets by environment variable), so what works here works on
+# Fly/Render. SQLite is for tests only and is deliberately not used here.
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      FABRICATE_DB_PROVIDER: postgres
+      FABRICATE_CONNECTION_STRING: "Host=db;Port=5432;Database=fabricate;Username=fabricate;Password=${POSTGRES_PASSWORD:-fabricate}"
+      FABRICATE_DATA_PROTECTION_KEYS_PATH: /app/keys
+    volumes:
+      # Data Protection key ring: losing it means stored per-workspace LLM credentials can no longer be decrypted.
+      - fabricate-keys:/app/keys
+    depends_on:
+      db:
+        condition: service_healthy
+    # Readiness: GET http://localhost:8080/healthz from the host (the runtime image ships no curl/wget).
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: fabricate
+      POSTGRES_USER: fabricate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fabricate}
+    volumes:
+      - fabricate-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fabricate -d fabricate"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not published to the host: the database is reachable only from the api service.
+
+volumes:
+  fabricate-db:
+  fabricate-keys:

@@ -1,0 +1,116 @@
+name: Integration Tests
+
+# Opt-in integration tests against real databases and cloud services (#57).
+# Each test self-gates on its environment variable, so a missing secret skips the test rather than failing it;
+# the "gates" step prints which suites are enabled so a silent skip is visible in the log.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+
+permissions:
+  contents: read
+  id-token: write # for AWS / GCP OIDC
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  postgres:
+    name: PostgreSQL (schema discovery + persistence)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fabricate_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      FABRICATE_POSTGRES_TEST_CONNECTION: "Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=fabricate_test"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - run: dotnet restore Fabricate.slnx
+      - run: dotnet build Fabricate.slnx --no-restore --configuration Release
+      - name: Run PostgreSQL tests
+        run: >
+          dotnet test Fabricate.Tests/Fabricate.Tests.csproj --no-build --configuration Release
+          --filter "FullyQualifiedName~PostgreSql|FullyQualifiedName~PostgresPersistence"
+          --logger "console;verbosity=normal"
+
+  nosql:
+    name: NoSQL adapters (Cosmos DB, MongoDB, DynamoDB, Firestore)
+    runs-on: ubuntu-latest
+    environment: integration
+    env:
+      COSMOSDB_CONNECTION_STRING: ${{ secrets.COSMOSDB_CONNECTION_STRING }}
+      COSMOSDB_TEST_DATABASE: ${{ secrets.COSMOSDB_TEST_DATABASE }}
+      MONGODB_CONNECTION_STRING: ${{ secrets.MONGODB_CONNECTION_STRING }}
+      MONGODB_TEST_DATABASE: ${{ secrets.MONGODB_TEST_DATABASE }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      DYNAMODB_TABLE_PREFIX: ${{ secrets.DYNAMODB_TABLE_PREFIX }}
+      DYNAMODB_LOCAL_URL: ${{ secrets.DYNAMODB_LOCAL_URL }}
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Report which gates are enabled (values are never printed)
+        run: |
+          for v in COSMOSDB_CONNECTION_STRING MONGODB_CONNECTION_STRING AWS_DEFAULT_REGION GOOGLE_CLOUD_PROJECT; do
+            if [ -n "${!v}" ]; then echo "enabled: $v"; else echo "skipped: $v not set"; fi
+          done
+
+      # AWS: prefer OIDC role assumption (repository variable AWS_ROLE_TO_ASSUME); fall back to static keys.
+      - name: Configure AWS credentials (OIDC)
+        if: vars.AWS_ROLE_TO_ASSUME != '' && env.AWS_DEFAULT_REGION != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+      - name: Configure AWS credentials (static keys)
+        if: vars.AWS_ROLE_TO_ASSUME == '' && env.AWS_DEFAULT_REGION != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      # GCP: the client libraries read a file path, so materialise the JSON secret into the runner temp dir.
+      - name: Configure GCP credentials
+        if: env.GOOGLE_CLOUD_PROJECT != ''
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+        run: |
+          if [ -z "$GOOGLE_APPLICATION_CREDENTIALS_JSON" ]; then
+            echo "GOOGLE_CLOUD_PROJECT is set but GOOGLE_APPLICATION_CREDENTIALS_JSON is not; Firestore tests will fail on auth." >&2
+            exit 0
+          fi
+          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > "$RUNNER_TEMP/gcp-credentials.json"
+          chmod 600 "$RUNNER_TEMP/gcp-credentials.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp-credentials.json" >> "$GITHUB_ENV"
+
+      - run: dotnet restore Fabricate.slnx
+      - run: dotnet build Fabricate.slnx --no-restore --configuration Release
+      - name: Run NoSQL adapter tests
+        run: >
+          dotnet test Fabricate.Tests/Fabricate.Tests.csproj --no-build --configuration Release
+          --filter "FullyQualifiedName~NoSqlAdapterIntegrationTests"
+          --logger "console;verbosity=normal"
+
+      - name: Remove materialised credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gcp-credentials.json"

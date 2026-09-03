@@ -160,12 +160,41 @@ Roles: Viewer | Editor | Admin</code></pre>
 
 200 OK  { "id": "sess-001", "workspaceId": "...", "title": "...", "mode": "standard", "archivedAt": null, "createdAt": "..." }</code></pre>
 
-<h4>POST /chat/sessions/{id}/messages</h4>
-<pre><code>POST /chat/sessions/sess-001/messages
+<h4>POST /workspaces/{workspaceId}/chat/sessions/{id}/messages</h4>
+<p>Runs the whole turn — persists the message, calls the workspace's configured model with the composed instructions, history and allowed tools, executes any tool calls it makes (up to <code>FABRICATE_LLM_MAX_TOOL_ITERATIONS</code> rounds) and returns the turn.</p>
+<pre><code>POST /workspaces/9a3b.../chat/sessions/sess-001/messages
 { "content": "Discover the schema for this database." }
 
 200 OK
-{ "id": "msg-001", "sessionId": "sess-001", "role": "assistant", "content": "I found 3 tables...", "createdAt": "..." }</code></pre>
+{
+  "userMessage":      { "id": "msg-001", "role": "User", "content": "Discover the schema...", "createdAt": "..." },
+  "assistantMessage": { "id": "msg-003", "role": "Assistant", "content": "I found 3 tables...", "createdAt": "..." },
+  "toolInvocations":  [ { "id": "inv-001", "toolName": "discover_schema", "status": "Succeeded", "outputJson": "{...}" } ],
+  "usage":            { "inputTokens": 1210, "outputTokens": 342, "totalTokens": 1552 },
+  "stopReason":       "EndTurn"
+}</code></pre>
+<p><code>stopReason</code> is <code>Refusal</code> when the provider declined and <code>Error</code> when the call failed; both arrive as a <code>System</code>-role notice, never an error response. With no LLM credential configured the notice says how to register one (see <a href="byok-llm-credentials.html">Bring your own LLM key</a>); <code>/tool &lt;name&gt; &lt;json&gt;</code> still runs a tool directly. Session <code>mode</code> is <code>Guided</code>, <code>Autonomous</code> or <code>ReviewRequired</code> (tool calls parked until approved).</p>
+
+<h4>POST /workspaces/{workspaceId}/chat/sessions/{id}/messages/stream</h4>
+<p>Same turn as server-sent events: <code>delta</code>, <code>tool_requested</code>, <code>tool_completed</code>, <code>notice</code>, then a terminal <code>completed</code> carrying the turn.</p>
+
+<h4>GET /workspaces/{workspaceId}/chat/sessions/{id}/tool-invocations</h4>
+<h4>POST /workspaces/{workspaceId}/chat/sessions/{id}/tool-invocations/{invocationId}/approve</h4>
+<p>Runs a <code>Pending</code> invocation from a <code>ReviewRequired</code> session. Requires the workspace Editor role or above.</p>
+
+<h2 id="llmcredentials">LLM Credentials</h2>
+<p>Bring-your-own-key credentials scoped to a workspace. Every response is a redacted summary (fingerprint and last four characters — never the secret). Register, rotate, revoke and policy changes require the workspace <strong>Admin</strong> role; list and validate need any role. A credential id from another workspace returns <code>404</code>. Full guide: <a href="byok-llm-credentials.html">Bring your own LLM key</a>.</p>
+<table>
+<thead><tr><th>Method</th><th>Route</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials</code></td><td>Register: <code>name</code>, <code>provider</code>, <code>model</code>, <code>secret</code>, optional <code>kind</code>, <code>endpoint</code>, <code>projectId</code>, <code>nonSecretSettings</code>, <code>isDefault</code>. Returns <code>201</code> + summary.</td></tr>
+<tr><td><code>GET</code></td><td><code>/workspaces/{workspaceId}/llm-credentials</code></td><td>List summaries.</td></tr>
+<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/{id}/rotate</code></td><td><code>{ "secret": "..." }</code></td></tr>
+<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/{id}/validate</code></td><td>Minimal provider probe, rate-limited to 10/min. Returns <code>{ isValid, message, checkedAt }</code>.</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/{id}</code></td><td>Soft revoke. <code>204</code>.</td></tr>
+<tr><td><code>GET</code> / <code>PUT</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/policy</code></td><td><code>{ "allowPlatformFallback": true }</code></td></tr>
+</tbody>
+</table>
 
 <h2 id="apikeys">API Keys</h2>
 

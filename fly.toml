@@ -1,0 +1,53 @@
+# Fly.io reference deployment for Fabricate (#61).
+#
+# The API is stateless: all durable state lives in PostgreSQL, so machines can scale to zero and back, and the
+# count can exceed one with no configuration change. Secrets are NEVER set here — see `fly secrets set` in
+# docs/how-to/self-hosting.md:
+#   FABRICATE_CONNECTION_STRING   PostgreSQL connection string (set automatically by `fly postgres attach` /
+#                                 `fly mpg attach`, or by hand for an external database)
+#   FABRICATE__BootstrapApiKey    first-run API key
+#   <your LLM key variable>       the variable that FABRICATE_LLM_API_KEY_SECRET names, e.g. ANTHROPIC_API_KEY
+
+app = "fabricate"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ASPNETCORE_ENVIRONMENT = "Production"
+  ASPNETCORE_URLS = "http://+:8080"
+  FABRICATE_DB_PROVIDER = "postgres"
+  # Operator (platform) LLM credential. Remove PROVIDER to run with per-workspace credentials only.
+  FABRICATE_LLM_PROVIDER = "anthropic"
+  FABRICATE_LLM_MODEL = "claude-opus-5"
+  FABRICATE_LLM_ALLOWED_MODELS = "claude-opus-5,claude-sonnet-5"
+  FABRICATE_LLM_API_KEY_SECRET = "ANTHROPIC_API_KEY"
+  # A single-operator instance: every workspace may use the platform credential.
+  FABRICATE_LLM_PLATFORM_FALLBACK = "always"
+  FABRICATE_LLM_TIMEOUT_SECONDS = "120"
+  # Data Protection key ring for encrypting tenant LLM credentials. Ephemeral disk: rotating this path loses the
+  # ability to decrypt stored BYOK credentials, so for multi-machine or long-lived deployments move the key ring to
+  # shared storage (see docs) before enabling per-workspace credentials.
+  FABRICATE_DATA_PROTECTION_KEYS_PATH = "/app/keys"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  # Grace period is derived from the measured cold start (see docs/how-to/self-hosting.md, "Cold start").
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "15s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

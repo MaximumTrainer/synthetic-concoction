@@ -7,6 +7,9 @@ public sealed class InMemoryAuditLogRepository : IAuditLogRepository
 {
     private readonly List<AuditEvent> _events = [];
 
+    /// <summary>Every event appended, in insertion order. Intended for tests.</summary>
+    public IReadOnlyList<AuditEvent> All => _events;
+
     public Task AppendAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default)
     {
         _events.Add(auditEvent);
