@@ -43,6 +43,8 @@ offending variable.
 | `FABRICATE_LLM_TIMEOUT_SECONDS` | no | Default 120. Set your platform's proxy timeout above this. |
 | `FABRICATE_LLM_MAX_TOOL_ITERATIONS` | no | Default 8. Caps the model/tool loop per turn. |
 | `FABRICATE_LLM_HISTORY_WINDOW` | no | Default 40 messages sent as context. |
+| `FABRICATE_LLM_MAX_INPUT_TOKENS` | no | Default 120000. Estimated input budget per request; oldest history is dropped to fit. `0` disables trimming. |
+| `FABRICATE_LLM_MAX_RETRIES` | no | Default 2. Retries of retryable provider failures (rate limit, transport, timeout, 5xx) with exponential backoff from 500 ms. Authentication and invalid-request failures are never retried. |
 | `FABRICATE_LLM_ALLOWED_ENDPOINT_HOSTS` | no | Hosts that workspace-supplied endpoints may target (suffix match). Empty = any public HTTPS host. |
 | `FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS` | no | `true` permits `http://` and private/loopback endpoints — for air-gapped local runtimes only. |
 

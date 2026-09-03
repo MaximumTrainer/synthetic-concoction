@@ -53,6 +53,8 @@
 <tr><td><code>FABRICATE_LLM_TIMEOUT_SECONDS</code></td><td>no</td><td>Default 120. Set your platform's proxy timeout above this.</td></tr>
 <tr><td><code>FABRICATE_LLM_MAX_TOOL_ITERATIONS</code></td><td>no</td><td>Default 8. Caps the model/tool loop per turn.</td></tr>
 <tr><td><code>FABRICATE_LLM_HISTORY_WINDOW</code></td><td>no</td><td>Default 40 messages sent as context.</td></tr>
+<tr><td><code>FABRICATE_LLM_MAX_INPUT_TOKENS</code></td><td>no</td><td>Default 120000. Estimated input budget per request; oldest history is dropped to fit. <code>0</code> disables trimming.</td></tr>
+<tr><td><code>FABRICATE_LLM_MAX_RETRIES</code></td><td>no</td><td>Default 2. Retries of retryable provider failures (rate limit, transport, timeout, 5xx) with exponential backoff from 500 ms. Authentication and invalid-request failures are never retried.</td></tr>
 <tr><td><code>FABRICATE_LLM_ALLOWED_ENDPOINT_HOSTS</code></td><td>no</td><td>Hosts that workspace-supplied endpoints may target (suffix match). Empty = any public HTTPS host.</td></tr>
 <tr><td><code>FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS</code></td><td>no</td><td><code>true</code> permits <code>http://</code> and private/loopback endpoints — for air-gapped local runtimes only.</td></tr>
 </tbody>

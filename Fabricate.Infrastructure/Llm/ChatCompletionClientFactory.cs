@@ -5,18 +5,29 @@ using Anthropic.Vertex;
 using Fabricate.Application.Abstractions;
 using Fabricate.Application.Llm;
 using Fabricate.Domain.Models;
+using Microsoft.Extensions.Logging;
 
 namespace Fabricate.Infrastructure.Llm;
 
 /// <summary>
 /// The one place vendor SDK clients are constructed. A client is built per resolved credential and never cached,
-/// so a rotated or revoked credential takes effect on the next turn.
+/// so a rotated or revoked credential takes effect on the next turn. Every client is wrapped in
+/// <see cref="ObservedChatCompletionClient"/>, which owns logging and retry; the SDKs' own retries are disabled so
+/// a failure is retried by exactly one layer.
 /// </summary>
-public sealed class ChatCompletionClientFactory(IHttpClientFactory httpClientFactory, LlmOptions options) : IChatCompletionClientFactory
+public sealed class ChatCompletionClientFactory(IHttpClientFactory httpClientFactory, ILoggerFactory loggerFactory, LlmOptions options) : IChatCompletionClientFactory
 {
     public const string HttpClientName = "fabricate-llm";
+    private static readonly TimeSpan BaseRetryDelay = TimeSpan.FromMilliseconds(500);
 
     public IChatCompletionClient Create(ResolvedLlmCredential credential)
+        => new ObservedChatCompletionClient(
+            CreateRaw(credential),
+            loggerFactory.CreateLogger<ObservedChatCompletionClient>(),
+            options.MaxRetries,
+            BaseRetryDelay);
+
+    private IChatCompletionClient CreateRaw(ResolvedLlmCredential credential)
     {
         var timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
 
@@ -25,8 +36,8 @@ public sealed class ChatCompletionClientFactory(IHttpClientFactory httpClientFac
             case LlmProvider.Anthropic:
             {
                 var client = string.IsNullOrWhiteSpace(credential.Endpoint)
-                    ? new AnthropicClient { ApiKey = credential.GetSecret(), Timeout = timeout, MaxRetries = 2 }
-                    : new AnthropicClient { ApiKey = credential.GetSecret(), Timeout = timeout, MaxRetries = 2, BaseUrl = credential.Endpoint };
+                    ? new AnthropicClient { ApiKey = credential.GetSecret(), Timeout = timeout, MaxRetries = 0 }
+                    : new AnthropicClient { ApiKey = credential.GetSecret(), Timeout = timeout, MaxRetries = 0, BaseUrl = credential.Endpoint };
                 return new AnthropicChatCompletionClient(client, "anthropic");
             }
 
@@ -37,7 +48,7 @@ public sealed class ChatCompletionClientFactory(IHttpClientFactory httpClientFac
                 var client = new AnthropicBedrockMantleClient(new MantleAwsClientOptions { AwsRegion = region })
                 {
                     Timeout = timeout,
-                    MaxRetries = 2,
+                    MaxRetries = 0,
                 };
                 return new AnthropicChatCompletionClient(client, "bedrock");
             }
@@ -50,7 +61,7 @@ public sealed class ChatCompletionClientFactory(IHttpClientFactory httpClientFac
                 var client = new AnthropicVertexClient(new AnthropicVertexCredentials(projectId, location))
                 {
                     Timeout = timeout,
-                    MaxRetries = 2,
+                    MaxRetries = 0,
                 };
                 return new AnthropicChatCompletionClient(client, "vertex");
             }
@@ -63,7 +74,7 @@ public sealed class ChatCompletionClientFactory(IHttpClientFactory httpClientFac
                 var client = new AnthropicFoundryClient(new AnthropicFoundryApiKeyCredentials(resource, credential.GetSecret()))
                 {
                     Timeout = timeout,
-                    MaxRetries = 2,
+                    MaxRetries = 0,
                 };
                 return new AnthropicChatCompletionClient(client, "foundry");
             }
