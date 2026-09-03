@@ -7,13 +7,13 @@ variable "location" {
 variable "resource_group_name" {
   type        = string
   description = "Name of the Azure Resource Group."
-  default     = "rg-concoction"
+  default     = "rg-fabricate"
 }
 
 variable "project_name" {
   type        = string
   description = "Short name used to prefix all resources."
-  default     = "concoction"
+  default     = "fabricate"
 }
 
 variable "environment" {

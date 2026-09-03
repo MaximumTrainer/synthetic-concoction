@@ -45,7 +45,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   resource_group_name    = azurerm_resource_group.main.name
   location               = azurerm_resource_group.main.location
   version                = "16"
-  administrator_login    = "concoction"
+  administrator_login    = "fabricate"
   administrator_password = var.db_admin_password
   storage_mb             = 32768
   sku_name               = "B_Standard_B1ms"
@@ -55,7 +55,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
 }
 
 resource "azurerm_postgresql_flexible_server_database" "app" {
-  name      = "concoction"
+  name      = "fabricate"
   server_id = azurerm_postgresql_flexible_server.main.id
   charset   = "UTF8"
   collation = "en_US.utf8"
@@ -177,11 +177,11 @@ resource "azurerm_container_app" "api" {
 
       env {
         name  = "ConnectionStrings__DefaultConnection"
-        value = "Host=${azurerm_postgresql_flexible_server.main.fqdn};Database=concoction;Username=concoction;Password=${var.db_admin_password};SslMode=Require"
+        value = "Host=${azurerm_postgresql_flexible_server.main.fqdn};Database=fabricate;Username=fabricate;Password=${var.db_admin_password};SslMode=Require"
       }
 
       env {
-        name  = "CONCOCTION__BootstrapApiKey"
+        name  = "FABRICATE__BootstrapApiKey"
         value = var.bootstrap_api_key
       }
 
@@ -228,7 +228,7 @@ resource "null_resource" "smoke_tests" {
     command = <<-EOT
       echo "Waiting 30s for Container App to stabilise..."
       sleep 30
-      dotnet test ${path.module}/../../Concoction.Tests.Smoke \
+      dotnet test ${path.module}/../../Fabricate.Tests.Smoke \
         --logger "console;verbosity=normal" \
         -e SMOKE_API_BASE_URL=https://${azurerm_container_app.api.ingress[0].fqdn} \
         -e SMOKE_API_KEY=${var.bootstrap_api_key}

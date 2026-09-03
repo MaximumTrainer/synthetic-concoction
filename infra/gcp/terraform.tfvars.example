@@ -2,7 +2,7 @@
 
 project_id   = "my-gcp-project-id"
 region       = "europe-west2"
-project_name = "concoction"
+project_name = "fabricate"
 environment  = "prod"
 
 # Image tag — set after docker push to Artifact Registry:

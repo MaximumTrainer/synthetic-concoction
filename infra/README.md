@@ -1,6 +1,6 @@
 # Cloud Infrastructure
 
-Terraform configurations for deploying Concoction to **AWS**, **Azure**, and **GCP**.
+Terraform configurations for deploying Fabricate to **AWS**, **Azure**, and **GCP**.
 
 Each module is self-contained and deploys:
 | Component | AWS | Azure | GCP |
@@ -64,7 +64,7 @@ infra/
 Build the image from the repository root:
 
 ```bash
-docker build -t concoction:latest .
+docker build -t fabricate:latest .
 ```
 
 ### AWS — push to ECR
@@ -75,8 +75,8 @@ aws ecr get-login-password --region eu-west-2 \
   | docker login --username AWS --password-stdin <account_id>.dkr.ecr.eu-west-2.amazonaws.com
 
 # Tag and push
-docker tag concoction:latest <account_id>.dkr.ecr.eu-west-2.amazonaws.com/concoction-prod:latest
-docker push <account_id>.dkr.ecr.eu-west-2.amazonaws.com/concoction-prod:latest
+docker tag fabricate:latest <account_id>.dkr.ecr.eu-west-2.amazonaws.com/fabricate-prod:latest
+docker push <account_id>.dkr.ecr.eu-west-2.amazonaws.com/fabricate-prod:latest
 ```
 
 Set `image_uri` in `infra/aws/terraform.tfvars` to the full URI above.
@@ -85,11 +85,11 @@ Set `image_uri` in `infra/aws/terraform.tfvars` to the full URI above.
 
 ```bash
 # Authenticate (run terraform apply once first to create the ACR)
-az acr login --name concoctionprodacr
+az acr login --name fabricateprodacr
 
 # Tag and push
-docker tag concoction:latest concoctionprodacr.azurecr.io/concoction:latest
-docker push concoctionprodacr.azurecr.io/concoction:latest
+docker tag fabricate:latest fabricateprodacr.azurecr.io/fabricate:latest
+docker push fabricateprodacr.azurecr.io/fabricate:latest
 ```
 
 ### GCP — push to Artifact Registry
@@ -99,8 +99,8 @@ docker push concoctionprodacr.azurecr.io/concoction:latest
 gcloud auth configure-docker europe-west2-docker.pkg.dev
 
 # Tag and push
-docker tag concoction:latest europe-west2-docker.pkg.dev/<project_id>/concoction/concoction:latest
-docker push europe-west2-docker.pkg.dev/<project_id>/concoction/concoction:latest
+docker tag fabricate:latest europe-west2-docker.pkg.dev/<project_id>/fabricate/fabricate:latest
+docker push europe-west2-docker.pkg.dev/<project_id>/fabricate/fabricate:latest
 ```
 
 ---
@@ -129,7 +129,7 @@ Terraform will automatically run smoke tests after a successful apply (requires 
 
 ```bash
 cd <repo_root>
-dotnet test Concoction.Tests.Smoke \
+dotnet test Fabricate.Tests.Smoke \
   -e SMOKE_API_BASE_URL=<api_url> \
   -e SMOKE_API_KEY=<bootstrap_api_key>
 ```

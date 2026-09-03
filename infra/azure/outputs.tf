@@ -1,5 +1,5 @@
 output "api_url" {
-  description = "Public FQDN of the Concoction API via Container Apps ingress."
+  description = "Public FQDN of the Fabricate API via Container Apps ingress."
   value       = "https://${azurerm_container_app.api.ingress[0].fqdn}"
 }
 

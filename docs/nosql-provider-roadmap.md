@@ -1,6 +1,6 @@
 # NoSQL Provider Roadmap
 
-Concoction currently supports **SQLite** and **PostgreSQL** for schema discovery and data profiling. This document defines the roadmap for extending support to cloud-native and document database platforms.
+Fabricate currently supports **SQLite** and **PostgreSQL** for schema discovery and data profiling. This document defines the roadmap for extending support to cloud-native and document database platforms.
 
 ---
 
@@ -10,10 +10,10 @@ Concoction currently supports **SQLite** and **PostgreSQL** for schema discovery
 |----------|----------|--------|-------|
 | SQLite | - | ✅ Implemented | — |
 | PostgreSQL | - | ✅ Implemented | — |
-| Azure Cosmos DB | Azure | 🚧 Stub — design complete | [#53](https://github.com/MaximumTrainer/synthetic-concoction/issues/53) |
-| MongoDB | Atlas / self-hosted | 🚧 Stub — design complete | [#54](https://github.com/MaximumTrainer/synthetic-concoction/issues/54) |
-| AWS DynamoDB | AWS | 🚧 Stub — design complete | [#55](https://github.com/MaximumTrainer/synthetic-concoction/issues/55) |
-| GCP Firestore | GCP | 🚧 Stub — design complete | [#56](https://github.com/MaximumTrainer/synthetic-concoction/issues/56) |
+| Azure Cosmos DB | Azure | 🚧 Stub — design complete | [#53](https://github.com/MaximumTrainer/synthetic-fabricate/issues/53) |
+| MongoDB | Atlas / self-hosted | 🚧 Stub — design complete | [#54](https://github.com/MaximumTrainer/synthetic-fabricate/issues/54) |
+| AWS DynamoDB | AWS | 🚧 Stub — design complete | [#55](https://github.com/MaximumTrainer/synthetic-fabricate/issues/55) |
+| GCP Firestore | GCP | 🚧 Stub — design complete | [#56](https://github.com/MaximumTrainer/synthetic-fabricate/issues/56) |
 | GCP Spanner | GCP | 📋 Planned | — |
 | Azure Table Storage | Azure | 📋 Planned | — |
 
@@ -21,7 +21,7 @@ Concoction currently supports **SQLite** and **PostgreSQL** for schema discovery
 
 ## Canonical Metadata Model
 
-Concoction represents any NoSQL collection using the provider-neutral `CollectionMetadata` record.
+Fabricate represents any NoSQL collection using the provider-neutral `CollectionMetadata` record.
 
 ### Relational vs NoSQL metadata mapping
 
@@ -55,7 +55,7 @@ Concoction represents any NoSQL collection using the provider-neutral `Collectio
 
 The following relational concepts have **no direct NoSQL equivalent** and require provider-specific handling:
 
-| Gap | Mitigation in Concoction |
+| Gap | Mitigation in Fabricate |
 |-----|------------------------|
 | Enforced referential integrity | `RelationshipHint` annotations (future — not yet modelled) |
 | Fixed column schema | Field inference by sampling N documents; confidence score recorded |
@@ -71,13 +71,13 @@ The following relational concepts have **no direct NoSQL equivalent** and requir
 ### Hexagonal architecture placement
 
 ```
-Concoction.Application.Abstractions
+Fabricate.Application.Abstractions
   INoSqlSchemaDiscoverer       ← port interface
   INoSqlDataProfiler           ← port interface
   INoSqlSchemaDiscovererFactory
   INoSqlDataProfilerFactory
 
-Concoction.Infrastructure.Schema
+Fabricate.Infrastructure.Schema
   CosmosDbSchemaDiscoverer     ← adapter (stub → full)
   MongoDbSchemaDiscoverer      ← adapter (stub → full)
   DynamoDbSchemaDiscoverer     ← adapter (stub → full)
@@ -202,7 +202,7 @@ Each full adapter (#53–#56) must include integration tests that:
 
 | Issue | Provider | Work |
 |-------|----------|------|
-| [#53](https://github.com/MaximumTrainer/synthetic-concoction/issues/53) | Azure Cosmos DB | Full `CosmosDbSchemaDiscoverer` + profiler |
-| [#54](https://github.com/MaximumTrainer/synthetic-concoction/issues/54) | MongoDB | Full `MongoDbSchemaDiscoverer` + profiler |
-| [#55](https://github.com/MaximumTrainer/synthetic-concoction/issues/55) | AWS DynamoDB | Full `DynamoDbSchemaDiscoverer` + profiler |
-| [#56](https://github.com/MaximumTrainer/synthetic-concoction/issues/56) | GCP Firestore | Full `FirestoreSchemaDiscoverer` + profiler |
+| [#53](https://github.com/MaximumTrainer/synthetic-fabricate/issues/53) | Azure Cosmos DB | Full `CosmosDbSchemaDiscoverer` + profiler |
+| [#54](https://github.com/MaximumTrainer/synthetic-fabricate/issues/54) | MongoDB | Full `MongoDbSchemaDiscoverer` + profiler |
+| [#55](https://github.com/MaximumTrainer/synthetic-fabricate/issues/55) | AWS DynamoDB | Full `DynamoDbSchemaDiscoverer` + profiler |
+| [#56](https://github.com/MaximumTrainer/synthetic-fabricate/issues/56) | GCP Firestore | Full `FirestoreSchemaDiscoverer` + profiler |

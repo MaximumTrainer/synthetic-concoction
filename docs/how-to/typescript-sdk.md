@@ -1,11 +1,11 @@
-# TypeScript SDK (`@concoction/client`)
+# TypeScript SDK (`@fabricate/client`)
 
-The `@concoction/client` npm package provides a typed client for the Concoction REST API. It ships as CJS + ESM + TypeScript declaration files (`.d.ts`).
+The `@fabricate/client` npm package provides a typed client for the Fabricate REST API. It ships as CJS + ESM + TypeScript declaration files (`.d.ts`).
 
 ## Installation
 
 ```bash
-npm install @concoction/client
+npm install @fabricate/client
 ```
 
 Or from the local source:
@@ -21,9 +21,9 @@ The built package is in `sdk/typescript/dist/`.
 ## Quick Start
 
 ```typescript
-import { ConcoctionClient, ConcoctionError } from "@concoction/client";
+import { FabricateClient, FabricateError } from "@fabricate/client";
 
-const client = new ConcoctionClient({
+const client = new FabricateClient({
   baseUrl: "http://localhost:5000",
   apiKey: "cnc_yoursecrethere",
 });
@@ -42,8 +42,8 @@ const project = await client.createProject(workspace.id, "Orders Dataset");
 ## Client Constructor Options
 
 ```typescript
-interface ConcoctionClientOptions {
-  /** Base URL of the Concoction API */
+interface FabricateClientOptions {
+  /** Base URL of the Fabricate API */
   baseUrl: string;
   /** API key (sent as X-Api-Key header) */
   apiKey: string;
@@ -154,8 +154,8 @@ await client.cancelRun("run-abc123");
 
 Polls a run at `intervalMs` (default 2 000ms) until it reaches a terminal state (`Completed`, `Failed`, `Cancelled`).
 
-- Throws `ConcoctionError` if the run fails or is cancelled.
-- Throws `ConcoctionError` if polling times out (default `timeoutMs = 120 000ms`).
+- Throws `FabricateError` if the run fails or is cancelled.
+- Throws `FabricateError` if polling times out (default `timeoutMs = 120 000ms`).
 
 ```typescript
 const workflowResult = await client.runWorkflow(workflowId);
@@ -247,20 +247,20 @@ await client.revokeApiKey("3fa85f64-...");
 
 ## Error Handling
 
-All HTTP errors throw `ConcoctionError`:
+All HTTP errors throw `FabricateError`:
 
 ```typescript
 try {
   const account = await client.getAccount("non-existent-id");
 } catch (err) {
-  if (err instanceof ConcoctionError) {
+  if (err instanceof FabricateError) {
     console.error(`HTTP ${err.status}: ${err.message}`);
     console.error(err.detail); // Problem Details "detail" field if available
   }
 }
 ```
 
-### ConcoctionError Properties
+### FabricateError Properties
 
 | Property | Type | Description |
 |---|---|---|
@@ -272,7 +272,7 @@ try {
 
 ## Type Definitions
 
-The SDK exports all types from `@concoction/client`:
+The SDK exports all types from `@fabricate/client`:
 
 ```typescript
 import type {
@@ -282,14 +282,14 @@ import type {
   ApiKeyCreateResult,
   ChatMessage,
   ChatSession,
-  ConcoctionClientOptions,
+  FabricateClientOptions,
   DatasetRun,
   PaginatedResult,
   Project,
   Workspace,
   Workflow,
   ComplianceProfile,
-} from "@concoction/client";
+} from "@fabricate/client";
 ```
 
 ---
@@ -313,7 +313,7 @@ Build output is in `dist/`. The package uses **tsup** to produce:
 ```typescript
 import fetch from "node-fetch";
 
-const client = new ConcoctionClient({
+const client = new FabricateClient({
   baseUrl: "http://localhost:5000",
   apiKey: "cnc_...",
   fetch: fetch as unknown as typeof globalThis.fetch,
@@ -327,7 +327,7 @@ const mockFetch = vi.fn().mockResolvedValue(
   new Response(JSON.stringify({ id: "acc-1", name: "Test" }), { status: 200 })
 );
 
-const client = new ConcoctionClient({
+const client = new FabricateClient({
   baseUrl: "http://localhost:5000",
   apiKey: "cnc_test",
   fetch: mockFetch,

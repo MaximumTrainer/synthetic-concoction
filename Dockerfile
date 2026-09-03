@@ -2,22 +2,22 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-COPY Concoction.slnx ./
+COPY Fabricate.slnx ./
 COPY Directory.Build.props ./
 COPY global.json ./
-COPY Concoction.Domain/Concoction.Domain.csproj Concoction.Domain/
-COPY Concoction.Application/Concoction.Application.csproj Concoction.Application/
-COPY Concoction.Infrastructure/Concoction.Infrastructure.csproj Concoction.Infrastructure/
-COPY Concoction.Api/Concoction.Api.csproj Concoction.Api/
+COPY Fabricate.Domain/Fabricate.Domain.csproj Fabricate.Domain/
+COPY Fabricate.Application/Fabricate.Application.csproj Fabricate.Application/
+COPY Fabricate.Infrastructure/Fabricate.Infrastructure.csproj Fabricate.Infrastructure/
+COPY Fabricate.Api/Fabricate.Api.csproj Fabricate.Api/
 
-RUN dotnet restore Concoction.Api/Concoction.Api.csproj
+RUN dotnet restore Fabricate.Api/Fabricate.Api.csproj
 
-COPY Concoction.Domain/ Concoction.Domain/
-COPY Concoction.Application/ Concoction.Application/
-COPY Concoction.Infrastructure/ Concoction.Infrastructure/
-COPY Concoction.Api/ Concoction.Api/
+COPY Fabricate.Domain/ Fabricate.Domain/
+COPY Fabricate.Application/ Fabricate.Application/
+COPY Fabricate.Infrastructure/ Fabricate.Infrastructure/
+COPY Fabricate.Api/ Fabricate.Api/
 
-RUN dotnet publish Concoction.Api/Concoction.Api.csproj \
+RUN dotnet publish Fabricate.Api/Fabricate.Api.csproj \
     -c Release \
     -o /app/publish \
     --no-restore
@@ -33,4 +33,4 @@ EXPOSE 8080
 
 COPY --from=build /app/publish .
 
-ENTRYPOINT ["dotnet", "Concoction.Api.dll"]
+ENTRYPOINT ["dotnet", "Fabricate.Api.dll"]

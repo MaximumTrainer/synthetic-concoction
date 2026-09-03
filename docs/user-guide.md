@@ -1,4 +1,4 @@
-# Concoction User Guide
+# Fabricate User Guide
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@
 
 ## Introduction & Concepts
 
-Concoction is a deterministic synthetic data platform for .NET. Given a live database (SQLite or PostgreSQL), it:
+Fabricate is a deterministic synthetic data platform for .NET. Given a live database (SQLite or PostgreSQL), it:
 
 1. **Discovers** the schema — tables, columns, primary keys, foreign keys, unique constraints, indexes.
 2. **Plans** generation order using topological sort to respect FK dependencies.
@@ -45,7 +45,7 @@ Concoction is a deterministic synthetic data platform for .NET. Given a live dat
 
 ## Schema Discovery
 
-Concoction uses provider-specific adapters to introspect a live database. The discovery process is read-only.
+Fabricate uses provider-specific adapters to introspect a live database. The discovery process is read-only.
 
 ### Providers
 
@@ -56,7 +56,7 @@ Concoction uses provider-specific adapters to introspect a live database. The di
 
 ### What is Discovered
 
-For each table, Concoction discovers:
+For each table, Fabricate discovers:
 
 - **Name** and **schema** (e.g. `public.users`)
 - **Columns**: name, SQL type, inferred `DataKind`, nullability, max length, precision/scale, default expression, allowed values (CHECK enums)
@@ -68,7 +68,7 @@ For each table, Concoction discovers:
 ### CLI Command
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- discover \
   --provider sqlite \
   --connection "Data Source=./mydb.db" \
   --database mydb \
@@ -102,7 +102,7 @@ Output is JSON printed to stdout:
 `discover-profile` augments discovery with diagnostics: detected self-referencing tables, cycle edges, unmapped column types, and columns with no inferred `DataKind`.
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover-profile \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- discover-profile \
   --provider sqlite \
   --connection "Data Source=./mydb.db"
 ```
@@ -113,7 +113,7 @@ Exit code 1 if any diagnostics are found; 0 otherwise.
 
 ## Generation Plan
 
-Before generating data, Concoction builds a **generation plan** by analysing FK edges.
+Before generating data, Fabricate builds a **generation plan** by analysing FK edges.
 
 ### Topological Ordering
 
@@ -121,7 +121,7 @@ Tables are sorted so that parent tables (the referenced side of a FK) are genera
 
 ### Cycle Detection
 
-If the FK graph contains a cycle (e.g. `orders.customer_id → customers.id` and `customers.preferred_order_id → orders.id`), the cycle is recorded in `GenerationPlan.Cycles`. Concoction generates one side first (breaking the cycle at an optional FK), then backfills the cyclic reference.
+If the FK graph contains a cycle (e.g. `orders.customer_id → customers.id` and `customers.preferred_order_id → orders.id`), the cycle is recorded in `GenerationPlan.Cycles`. Fabricate generates one side first (breaking the cycle at an optional FK), then backfills the cyclic reference.
 
 ### Self-Referencing Tables
 
@@ -182,7 +182,7 @@ Every column is mapped to a `DataKind` which determines how values are generated
 
 ### DataKind Inference
 
-Concoction infers `DataKind` from the SQL type name. Column names are used as secondary signals: a `VARCHAR` column named `email` is inferred as `DataKind.Email`.
+Fabricate infers `DataKind` from the SQL type name. Column names are used as secondary signals: a `VARCHAR` column named `email` is inferred as `DataKind.Email`.
 
 To override inference, use a [Rules DSL](#rules-dsl) entry with the `strategy` field.
 
@@ -194,7 +194,7 @@ The Rules DSL lets you override every aspect of value generation on a per-column
 
 ### How Rules Work
 
-Without a rules file Concoction infers a `DataKind` for each column from its SQL type and column name. Rules let you override that inference at any granularity:
+Without a rules file Fabricate infers a `DataKind` for each column from its SQL type and column name. Rules let you override that inference at any granularity:
 
 - Force a specific **strategy** (any `DataKind` name) on a column regardless of its SQL type.
 - Emit a **fixed value** for every row.
@@ -206,7 +206,7 @@ Without a rules file Concoction infers a `DataKind` for each column from its SQL
 ### CLI Usage
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider sqlite \
   --connection "Data Source=./mydb.db" \
   --rules ./rules.yaml \
@@ -242,7 +242,7 @@ tables:
 }
 ```
 
-The `table` name must be fully qualified with its schema, matching the value Concoction uses in its schema discovery output: `"public.users"` for PostgreSQL or `"main.users"` for SQLite.
+The `table` name must be fully qualified with its schema, matching the value Fabricate uses in its schema discovery output: `"public.users"` for PostgreSQL or `"main.users"` for SQLite.
 
 ### Column Rule Fields
 
@@ -468,7 +468,7 @@ Inherits Healthcare masking, plus additional financial field masking:
 ### CLI Usage
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider postgres \
   --connection "Host=localhost;Database=prod_clone;Username=dev;Password=dev" \
   --compliance-profile Healthcare \
@@ -493,7 +493,7 @@ The `GenerationResult.ComplianceDecisions` list records every column affected by
 
 ## Validation
 
-After generation, Concoction runs a validation pass over the generated rows and records any issues in `GenerationResult.ValidationIssues`.
+After generation, Fabricate runs a validation pass over the generated rows and records any issues in `GenerationResult.ValidationIssues`.
 
 ### Checks Performed
 
@@ -592,7 +592,7 @@ INSERT INTO "main"."users" ("id", "email", "status") VALUES (2, 'bob@example.com
 ### Export Command (single format)
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- export \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- export \
   --provider sqlite \
   --connection "Data Source=./mydb.db" \
   --format csv \
@@ -649,7 +649,7 @@ Account-level governance controls:
 
 ## Agent Chat
 
-The chat system lets you interact with Concoction in natural language via a persistent session.
+The chat system lets you interact with Fabricate in natural language via a persistent session.
 
 ### Sessions
 
@@ -711,7 +711,7 @@ Returns `{ "runId": "..." }`. Use `GET /runs/{runId}` or the TypeScript SDK's `p
 
 ### Skills
 
-Concoction has a custom skill registry. Skills are callable units registered in the platform (analogous to OpenAPI-defined functions). The skill registry supports OpenAPI contract ingestion — import an external API spec and Concoction will expose its operations as callable workflow steps.
+Fabricate has a custom skill registry. Skills are callable units registered in the platform (analogous to OpenAPI-defined functions). The skill registry supports OpenAPI contract ingestion — import an external API spec and Fabricate will expose its operations as callable workflow steps.
 
 ---
 
@@ -782,7 +782,7 @@ A **self-referencing foreign key** is a column in table T that references the pr
 
 ### Generation Strategy
 
-Concoction handles self-referencing tables with the following algorithm:
+Fabricate handles self-referencing tables with the following algorithm:
 
 1. **Row 0 (root)**: The first generated row sets the self-referencing FK to `null` (if the column is nullable).
 2. **Rows 1..N**: Each subsequent row references the row at index `N-1` (forming a chain/tree).

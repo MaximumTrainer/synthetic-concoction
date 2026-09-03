@@ -5,7 +5,7 @@ import type {
   ApiKeyCreateResult,
   ChatMessage,
   ChatSession,
-  ConcoctionClientOptions,
+  FabricateClientOptions,
   DatasetRun,
   PaginatedResult,
   Project,
@@ -13,23 +13,23 @@ import type {
   Workflow,
 } from "./types.js";
 
-export class ConcoctionError extends Error {
+export class FabricateError extends Error {
   constructor(
     message: string,
     public readonly status: number,
     public readonly detail?: string
   ) {
     super(message);
-    this.name = "ConcoctionError";
+    this.name = "FabricateError";
   }
 }
 
-export class ConcoctionClient {
+export class FabricateClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly fetchFn: typeof globalThis.fetch;
 
-  constructor(options: ConcoctionClientOptions) {
+  constructor(options: FabricateClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.apiKey = options.apiKey;
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -128,12 +128,12 @@ export class ConcoctionClient {
     while (Date.now() < deadline) {
       const run = await this.getRun(runId);
       if (run.status === "Completed") return run;
-      if (run.status === "Failed") throw new ConcoctionError(`Run ${runId} failed`, 0);
-      if (run.status === "Cancelled") throw new ConcoctionError(`Run ${runId} was cancelled`, 0);
+      if (run.status === "Failed") throw new FabricateError(`Run ${runId} failed`, 0);
+      if (run.status === "Cancelled") throw new FabricateError(`Run ${runId} was cancelled`, 0);
       await sleep(intervalMs);
     }
 
-    throw new ConcoctionError(`Timed out polling run ${runId}`, 0);
+    throw new FabricateError(`Timed out polling run ${runId}`, 0);
   }
 
   // ─── Workflows ───────────────────────────────────────────────────────────────
@@ -236,7 +236,7 @@ export class ConcoctionClient {
       } catch {
         detail = text;
       }
-      throw new ConcoctionError(
+      throw new FabricateError(
         `HTTP ${res.status} ${res.statusText}`,
         res.status,
         detail

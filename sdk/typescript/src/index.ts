@@ -1,4 +1,4 @@
-export { ConcoctionClient, ConcoctionError } from "./client.js";
+export { FabricateClient, FabricateError } from "./client.js";
 export type {
   Account,
   AccountMembership,
@@ -7,7 +7,7 @@ export type {
   ChatMessage,
   ChatSession,
   ComplianceProfile,
-  ConcoctionClientOptions,
+  FabricateClientOptions,
   DatasetRun,
   PaginatedResult,
   Project,

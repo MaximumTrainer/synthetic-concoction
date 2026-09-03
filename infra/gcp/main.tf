@@ -32,7 +32,7 @@ resource "google_artifact_registry_repository" "app" {
   repository_id = var.project_name
   location      = local.artifact_region
   format        = "DOCKER"
-  description   = "Concoction API container images"
+  description   = "Fabricate API container images"
 
   depends_on = [google_project_service.apis]
 }
@@ -67,12 +67,12 @@ resource "google_sql_database_instance" "main" {
 }
 
 resource "google_sql_database" "app" {
-  name     = "concoction"
+  name     = "fabricate"
   instance = google_sql_database_instance.main.name
 }
 
 resource "google_sql_user" "app" {
-  name     = "concoction"
+  name     = "fabricate"
   instance = google_sql_database_instance.main.name
   password = var.db_password
 }
@@ -102,7 +102,7 @@ resource "google_secret_manager_secret_version" "bootstrap_key" {
 
 resource "google_service_account" "app" {
   account_id   = "${local.name}-sa"
-  display_name = "Concoction API service account"
+  display_name = "Fabricate API service account"
 }
 
 resource "google_secret_manager_secret_iam_member" "app_bootstrap" {
@@ -153,11 +153,11 @@ resource "google_cloud_run_v2_service" "api" {
 
       env {
         name  = "ConnectionStrings__DefaultConnection"
-        value = "Host=${google_sql_database_instance.main.public_ip_address};Database=concoction;Username=concoction;Password=${var.db_password}"
+        value = "Host=${google_sql_database_instance.main.public_ip_address};Database=fabricate;Username=fabricate;Password=${var.db_password}"
       }
 
       env {
-        name = "CONCOCTION__BootstrapApiKey"
+        name = "FABRICATE__BootstrapApiKey"
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.bootstrap_key.secret_id
@@ -220,7 +220,7 @@ resource "null_resource" "smoke_tests" {
     command = <<-EOT
       echo "Waiting 30s for Cloud Run service to stabilise..."
       sleep 30
-      dotnet test ${path.module}/../../Concoction.Tests.Smoke \
+      dotnet test ${path.module}/../../Fabricate.Tests.Smoke \
         --logger "console;verbosity=normal" \
         -e SMOKE_API_BASE_URL=${google_cloud_run_v2_service.api.uri} \
         -e SMOKE_API_KEY=${var.bootstrap_api_key}

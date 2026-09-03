@@ -1,20 +1,20 @@
-# @concoction/client
+# @fabricate/client
 
-TypeScript SDK for the [Concoction](https://github.com/MaximumTrainer/concoction) synthetic data API.
+TypeScript SDK for the [Fabricate](https://github.com/MaximumTrainer/synthetic-fabricate) synthetic data API.
 
 ## Installation
 
 ```bash
-npm install @concoction/client
+npm install @fabricate/client
 ```
 
 ## Quick start
 
 ```typescript
-import { ConcoctionClient } from "@concoction/client";
+import { FabricateClient } from "@fabricate/client";
 
-const client = new ConcoctionClient({
-  baseUrl: "https://your-concoction-instance.example.com",
+const client = new FabricateClient({
+  baseUrl: "https://your-fabricate-instance.example.com",
   apiKey: "cnc_your_api_key_here",
 });
 
@@ -32,12 +32,12 @@ console.log("Run status:", run.status);
 ## Error handling
 
 ```typescript
-import { ConcoctionClient, ConcoctionError } from "@concoction/client";
+import { FabricateClient, FabricateError } from "@fabricate/client";
 
 try {
   await client.getAccount("unknown-id");
 } catch (err) {
-  if (err instanceof ConcoctionError) {
+  if (err instanceof FabricateError) {
     console.error(`API error ${err.status}: ${err.detail}`);
   }
 }

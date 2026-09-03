@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project_name" {
   type        = string
   description = "Short name used to prefix all resources."
-  default     = "concoction"
+  default     = "fabricate"
 }
 
 variable "environment" {
@@ -18,7 +18,7 @@ variable "environment" {
 
 variable "image_uri" {
   type        = string
-  description = "Full ECR image URI including tag, e.g. 123456789012.dkr.ecr.eu-west-2.amazonaws.com/concoction:latest"
+  description = "Full ECR image URI including tag, e.g. 123456789012.dkr.ecr.eu-west-2.amazonaws.com/fabricate:latest"
 }
 
 variable "db_password" {

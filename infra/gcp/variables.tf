@@ -12,7 +12,7 @@ variable "region" {
 variable "project_name" {
   type        = string
   description = "Short name used to prefix all resources."
-  default     = "concoction"
+  default     = "fabricate"
 }
 
 variable "environment" {

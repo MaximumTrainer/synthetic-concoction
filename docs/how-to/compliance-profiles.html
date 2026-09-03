@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Compliance Profiles — Concoction</title>
+<title>Compliance Profiles — Fabricate</title>
 <style></style>
 </head>
 <body>
 <nav>
-  <a href="../index.html" class="nav-brand">&#9879; Concoction</a>
+  <a href="../index.html" class="nav-brand">&#9879; Fabricate</a>
   <ul class="nav-links">
     <li><a href="../user-guide.html">User Guide</a></li>
     <li><a href="cli-quickstart.html">CLI</a></li>
@@ -14,7 +14,7 @@
     <li><a href="compliance-profiles.html">Compliance</a></li>
     <li><a href="rest-api.html">API</a></li>
     <li><a href="typescript-sdk.html">TypeScript SDK</a></li>
-    <li><a href="https://github.com/MaximumTrainer/concoction">GitHub</a></li>
+    <li><a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></li>
   </ul>
 </nav>
 <div class="page">
@@ -55,7 +55,7 @@
 
 <h2 id="cli">CLI Usage</h2>
 <pre><code># Healthcare masking
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider postgres \
   --connection "Host=localhost;Database=prod_clone;Username=dev;Password=dev" \
   --compliance-profile Healthcare \
@@ -63,7 +63,7 @@ dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
   --output ./artifacts
 
 # Finance masking
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider sqlite \
   --connection "Data Source=./finance.db" \
   --compliance-profile Finance \
@@ -109,8 +109,8 @@ dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
 }</code></pre>
 
 <h2 id="extending">Extending</h2>
-<p>To add a custom compliance profile, implement <code>ISensitiveFieldClassifier</code> in <code>Concoction.Application</code> and register it in the DI container.</p>
+<p>To add a custom compliance profile, implement <code>ISensitiveFieldClassifier</code> in <code>Fabricate.Application</code> and register it in the DI container.</p>
 </div>
-<footer><p>&copy; 2024 Concoction contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/concoction">GitHub</a></p></footer>
+<footer><p>&copy; 2024 Fabricate contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></p></footer>
 </body>
 </html>

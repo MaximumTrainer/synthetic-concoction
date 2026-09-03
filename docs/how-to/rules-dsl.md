@@ -1,6 +1,6 @@
 # Rules DSL Reference
 
-The Concoction Rules DSL lets you override generation strategies for specific tables and columns. Rules files can be written in **YAML** or **JSON** and passed to the CLI with `--rules <path>`.
+The Fabricate Rules DSL lets you override generation strategies for specific tables and columns. Rules files can be written in **YAML** or **JSON** and passed to the CLI with `--rules <path>`.
 
 ## File Format
 
@@ -213,7 +213,7 @@ For `JSON` or `JSONB` columns, use `jsonPaths` to specify per-path strategies:
 
 ## Precedence Merge
 
-When multiple rule sources are combined (e.g. a global defaults file and a project-specific file), Concoction merges them in priority order:
+When multiple rule sources are combined (e.g. a global defaults file and a project-specific file), Fabricate merges them in priority order:
 
 ```
 global defaults  <  project defaults  <  table rules  <  column rules
@@ -223,7 +223,7 @@ More specific rules win. Merging is performed by `IRuleConfigurationService.Merg
 
 ## Validation
 
-When you pass `--rules`, Concoction validates the file before generation:
+When you pass `--rules`, Fabricate validates the file before generation:
 
 - `version` must be `"1"`
 - `table` must be a non-empty string

@@ -1,6 +1,6 @@
 # AWS Deployment Setup Guide
 
-Step-by-step guide to deploying Concoction on **AWS** using ECS Fargate, ALB, RDS PostgreSQL, ECR, and Secrets Manager in `eu-west-2`.
+Step-by-step guide to deploying Fabricate on **AWS** using ECS Fargate, ALB, RDS PostgreSQL, ECR, and Secrets Manager in `eu-west-2`.
 
 ---
 
@@ -23,7 +23,7 @@ Step-by-step guide to deploying Concoction on **AWS** using ECS Fargate, ALB, RD
 
 1. Sign in to the [AWS Console](https://console.aws.amazon.com/iam)
 2. **IAM → Users → Create user**
-   - Username: `concoction-deploy`
+   - Username: `fabricate-deploy`
    - Access type: **Programmatic access**
 3. Attach the following managed policies:
    - `AmazonEC2FullAccess`
@@ -65,7 +65,7 @@ Edit `terraform.tfvars` — **never commit this file**:
 
 ```hcl
 aws_region        = "eu-west-2"
-project_name      = "concoction"
+project_name      = "fabricate"
 environment       = "prod"
 
 # Set after first apply (see section 5):
@@ -98,7 +98,7 @@ Get the repository URL:
 
 ```bash
 terraform output ecr_repository_url
-# → 123456789012.dkr.ecr.eu-west-2.amazonaws.com/concoction-prod
+# → 123456789012.dkr.ecr.eu-west-2.amazonaws.com/fabricate-prod
 ```
 
 ---
@@ -109,7 +109,7 @@ From the **repository root**:
 
 ```bash
 # Build
-docker build -t concoction:latest .
+docker build -t fabricate:latest .
 
 # Authenticate Docker with ECR
 aws ecr get-login-password --region eu-west-2 \
@@ -118,7 +118,7 @@ aws ecr get-login-password --region eu-west-2 \
 
 # Tag
 ECR_URI=$(cd infra/aws && terraform output -raw ecr_repository_url)
-docker tag concoction:latest ${ECR_URI}:latest
+docker tag fabricate:latest ${ECR_URI}:latest
 
 # Push
 docker push ${ECR_URI}:latest
@@ -127,7 +127,7 @@ docker push ${ECR_URI}:latest
 Update `image_uri` in `infra/aws/terraform.tfvars`:
 
 ```hcl
-image_uri = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/concoction-prod:latest"
+image_uri = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/fabricate-prod:latest"
 ```
 
 ---
@@ -150,10 +150,10 @@ Terraform will:
 Expected output after apply:
 
 ```
-api_url                = "http://concoction-prod-alb-1234567890.eu-west-2.elb.amazonaws.com"
-ecr_repository_url     = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/concoction-prod"
-ecs_cluster_name       = "concoction-prod"
-rds_endpoint           = "concoction-prod-postgres.abc123.eu-west-2.rds.amazonaws.com"
+api_url                = "http://fabricate-prod-alb-1234567890.eu-west-2.elb.amazonaws.com"
+ecr_repository_url     = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/fabricate-prod"
+ecs_cluster_name       = "fabricate-prod"
+rds_endpoint           = "fabricate-prod-postgres.abc123.eu-west-2.rds.amazonaws.com"
 ```
 
 ---
@@ -174,7 +174,7 @@ curl -H "X-Api-Key: cnc_your-secret-bootstrap-key" \
 Run smoke tests manually:
 
 ```bash
-dotnet test Concoction.Tests.Smoke \
+dotnet test Fabricate.Tests.Smoke \
   -e SMOKE_API_BASE_URL=${API_URL} \
   -e SMOKE_API_KEY=cnc_your-secret-bootstrap-key
 ```
@@ -211,17 +211,17 @@ GitHub → Actions → Deploy → Run workflow → cloud: aws
 ```bash
 # View ECS service status
 aws ecs describe-services \
-  --cluster concoction-prod \
-  --services concoction-prod \
+  --cluster fabricate-prod \
+  --services fabricate-prod \
   --region eu-west-2
 
 # Tail ECS logs (replace <task-id>)
-aws logs tail /ecs/concoction-prod --follow
+aws logs tail /ecs/fabricate-prod --follow
 
 # Force new ECS deployment (after pushing a new image)
 aws ecs update-service \
-  --cluster concoction-prod \
-  --service concoction-prod \
+  --cluster fabricate-prod \
+  --service fabricate-prod \
   --force-new-deployment \
   --region eu-west-2
 ```
@@ -243,7 +243,7 @@ terraform destroy
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| ECS task keeps stopping | Container unhealthy | Check CloudWatch logs: `aws logs tail /ecs/concoction-prod` |
+| ECS task keeps stopping | Container unhealthy | Check CloudWatch logs: `aws logs tail /ecs/fabricate-prod` |
 | ALB returns 502 | Task not yet healthy | Wait 60s, check target group health |
 | `UnauthorizedException` pulling image | ECR auth expired | Re-run `aws ecr get-login-password` + `docker login` |
 | Smoke tests fail with 401 | Bootstrap key mismatch | Ensure `SMOKE_API_KEY` matches `bootstrap_api_key` in tfvars |
