@@ -1,5 +1,5 @@
 output "api_url" {
-  description = "Public URL of the Concoction API via the ALB."
+  description = "Public URL of the Fabricate API via the ALB."
   value       = "http://${aws_lb.main.dns_name}"
 }
 

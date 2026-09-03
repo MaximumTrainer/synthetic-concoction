@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="Fabricate.Api/Fabricate.Api.csproj" />
+  <Project Path="Fabricate.Application/Fabricate.Application.csproj" />
+  <Project Path="Fabricate.Cli/Fabricate.Cli.csproj" />
+  <Project Path="Fabricate.Domain/Fabricate.Domain.csproj" />
+  <Project Path="Fabricate.Infrastructure/Fabricate.Infrastructure.csproj" />
+  <Project Path="Fabricate.Tests/Fabricate.Tests.csproj" />
+  <Project Path="Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj" />
+</Solution>

@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>User Guide — Concoction</title>
+<title>User Guide — Fabricate</title>
 <style></style>
 </head>
 <body>
 <nav>
-  <a href="index.html" class="nav-brand">&#9879; Concoction</a>
+  <a href="index.html" class="nav-brand">&#9879; Fabricate</a>
   <ul class="nav-links">
     <li><a href="user-guide.html">User Guide</a></li>
     <li><a href="how-to/cli-quickstart.html">CLI</a></li>
@@ -14,12 +14,12 @@
     <li><a href="how-to/compliance-profiles.html">Compliance</a></li>
     <li><a href="how-to/rest-api.html">API</a></li>
     <li><a href="how-to/typescript-sdk.html">TypeScript SDK</a></li>
-    <li><a href="https://github.com/MaximumTrainer/concoction">GitHub</a></li>
+    <li><a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></li>
   </ul>
 </nav>
 <div class="page">
-<h1>Concoction User Guide</h1>
-<p>Complete reference for the Concoction synthetic data platform.</p>
+<h1>Fabricate User Guide</h1>
+<p>Complete reference for the Fabricate synthetic data platform.</p>
 
 <div class="toc">
   <div class="toc-title">Table of Contents</div>
@@ -42,7 +42,7 @@
 </div>
 
 <h2 id="intro">1. Introduction &amp; Concepts</h2>
-<p>Concoction is a deterministic synthetic data platform for .NET 10. Given a live database it discovers the schema, plans generation order, generates realistic synthetic rows, validates referential integrity, and exports results in CSV, JSON, and SQL.</p>
+<p>Fabricate is a deterministic synthetic data platform for .NET 10. Given a live database it discovers the schema, plans generation order, generates realistic synthetic rows, validates referential integrity, and exports results in CSV, JSON, and SQL.</p>
 <table>
   <tr><th>Term</th><th>Meaning</th></tr>
   <tr><td><code>Seed</code></td><td>Integer that makes generation deterministic. Same seed + same schema = identical output.</td></tr>
@@ -55,7 +55,7 @@
 </table>
 
 <h2 id="discovery">2. Schema Discovery</h2>
-<p>Concoction uses provider-specific adapters to introspect a live database. The discovery process is read-only.</p>
+<p>Fabricate uses provider-specific adapters to introspect a live database. The discovery process is read-only.</p>
 <h3>Providers</h3>
 <table>
   <tr><th>Provider</th><th>--provider value</th><th>Notes</th></tr>
@@ -65,23 +65,23 @@
 <h3>What is Discovered</h3>
 <p>For each table: name and schema, columns (name, SQL type, inferred DataKind, nullability, max length, precision/scale, default, allowed values), primary key, foreign keys, unique constraints, and indexes.</p>
 <h3>CLI</h3>
-<pre><code>dotnet run --project ./Concoction.Cli -- discover \
+<pre><code>dotnet run --project ./Fabricate.Cli -- discover \
   --provider sqlite \
   --connection "Data Source=./mydb.db" \
   --database mydb \
   --seed 42</code></pre>
 <h3>Profile Command</h3>
 <p><code>discover-profile</code> augments discovery with diagnostics: self-referencing tables, cycle edges, and unmapped column types. Exit code 1 if diagnostics found.</p>
-<pre><code>dotnet run --project ./Concoction.Cli -- discover-profile \
+<pre><code>dotnet run --project ./Fabricate.Cli -- discover-profile \
   --provider sqlite \
   --connection "Data Source=./mydb.db"</code></pre>
 
 <h2 id="plan">3. Generation Plan</h2>
-<p>Before generating data, Concoction builds a generation plan by analysing FK edges.</p>
+<p>Before generating data, Fabricate builds a generation plan by analysing FK edges.</p>
 <h3>Topological Ordering</h3>
 <p>Tables are sorted so parent tables (referenced side of a FK) are generated before child tables (referencing side).</p>
 <h3>Cycle Detection</h3>
-<p>Cycles are recorded in <code>GenerationPlan.Cycles</code>. Concoction generates one side first (breaking the cycle at an optional FK), then backfills the cyclic reference.</p>
+<p>Cycles are recorded in <code>GenerationPlan.Cycles</code>. Fabricate generates one side first (breaking the cycle at an optional FK), then backfills the cyclic reference.</p>
 <h3>Self-Referencing Tables</h3>
 <p>Tables with a FK pointing back to themselves are listed in <code>GenerationPlan.SelfReferencingTables</code>.</p>
 <pre><code>{
@@ -131,7 +131,7 @@
 <p>The Rules DSL lets you override every aspect of value generation on a per-column basis. Rules are stored in a YAML or JSON file (version <code>"1"</code>) and passed to the CLI with <code>--rules &lt;path&gt;</code>. See the dedicated <a href="how-to/rules-dsl.html">Rules DSL reference</a> for a full field listing.</p>
 
 <h3>How Rules Work</h3>
-<p>Without a rules file Concoction infers a <code>DataKind</code> for each column from its SQL type and column name. Rules let you override that inference at any granularity:</p>
+<p>Without a rules file Fabricate infers a <code>DataKind</code> for each column from its SQL type and column name. Rules let you override that inference at any granularity:</p>
 <ul>
   <li>Force a specific <strong>strategy</strong> (any <code>DataKind</code> name) on a column regardless of its SQL type.</li>
   <li>Emit a <strong>fixed value</strong> for every row.</li>
@@ -142,7 +142,7 @@
 </ul>
 
 <h3>CLI Usage</h3>
-<pre><code>dotnet run --project ./Concoction.Cli -- generate \
+<pre><code>dotnet run --project ./Fabricate.Cli -- generate \
   --provider sqlite \
   --connection "Data Source=./mydb.db" \
   --rules ./rules.yaml \
@@ -168,7 +168,7 @@ tables:
     }
   ]
 }</code></pre>
-<p>The <code>table</code> name must be fully qualified with its schema, matching the value Concoction uses in its schema discovery output: <code>"public.users"</code> for PostgreSQL or <code>"main.users"</code> for SQLite.</p>
+<p>The <code>table</code> name must be fully qualified with its schema, matching the value Fabricate uses in its schema discovery output: <code>"public.users"</code> for PostgreSQL or <code>"main.users"</code> for SQLite.</p>
 
 <h3>Column Rule Fields</h3>
 <table>
@@ -316,7 +316,7 @@ tables:
   <tr><td>Healthcare</td><td><code>Healthcare</code></td><td>HIPAA-style: masks Email, Phone, Name, Address, PostalCode.</td></tr>
   <tr><td>Finance</td><td><code>Finance</code></td><td>PCI-style: all Healthcare masks plus Currency/financial identifiers.</td></tr>
 </table>
-<pre><code>dotnet run --project ./Concoction.Cli -- generate \
+<pre><code>dotnet run --project ./Fabricate.Cli -- generate \
   --provider postgres \
   --connection "Host=localhost;Database=db;Username=dev;Password=dev" \
   --compliance-profile Healthcare \
@@ -324,7 +324,7 @@ tables:
 <p><strong>Precedence:</strong> <code>fixedValue</code> wins over compliance masking. Compliance profile wins over <code>strategy</code> for sensitive field categories.</p>
 
 <h2 id="validation">8. Validation</h2>
-<p>After generation, Concoction validates constraints and records issues in <code>GenerationResult.ValidationIssues</code>.</p>
+<p>After generation, Fabricate validates constraints and records issues in <code>GenerationResult.ValidationIssues</code>.</p>
 <table>
   <tr><th>Check</th><th>Description</th></tr>
   <tr><td>FK Integrity</td><td>Every non-null FK value references an existing row in the parent table.</td></tr>
@@ -380,7 +380,7 @@ tables:
 </table>
 
 <h2 id="chat">11. Agent Chat</h2>
-<p>Chat sessions let you interact with Concoction via natural language. Sessions are created per workspace.</p>
+<p>Chat sessions let you interact with Fabricate via natural language. Sessions are created per workspace.</p>
 <h3>Built-in Tools</h3>
 <table>
   <tr><th>Tool</th><th>Description</th></tr>
@@ -412,6 +412,6 @@ tables:
 </ol>
 <p>If the self-referencing FK is <strong>non-nullable</strong>, row 0 cannot be null and a <code>ValidationIssue</code> is emitted. Use <code>discover-profile</code> to identify these tables early.</p>
 </div>
-<footer><p>&copy; 2024 Concoction contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/concoction">GitHub</a></p></footer>
+<footer><p>&copy; 2024 Fabricate contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></p></footer>
 </body>
 </html>

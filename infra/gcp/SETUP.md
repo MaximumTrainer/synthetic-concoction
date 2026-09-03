@@ -1,6 +1,6 @@
 # GCP Deployment Setup Guide
 
-Step-by-step guide to deploying Concoction on **GCP** using Cloud Run, Cloud SQL PostgreSQL, Artifact Registry, and Secret Manager in `europe-west2`.
+Step-by-step guide to deploying Fabricate on **GCP** using Cloud Run, Cloud SQL PostgreSQL, Artifact Registry, and Secret Manager in `europe-west2`.
 
 ---
 
@@ -24,10 +24,10 @@ Step-by-step guide to deploying Concoction on **GCP** using Cloud Run, Cloud SQL
 gcloud projects list
 
 # Create a new project (optional)
-gcloud projects create concoction-prod --name="Concoction"
+gcloud projects create fabricate-prod --name="Fabricate"
 
 # Set the active project
-gcloud config set project concoction-prod
+gcloud config set project fabricate-prod
 ```
 
 ### 2.2 Enable billing
@@ -53,10 +53,10 @@ For production or CI/CD use, create a dedicated service account instead of using
 
 ```bash
 # Create service account
-gcloud iam service-accounts create concoction-terraform \
-  --display-name="Concoction Terraform"
+gcloud iam service-accounts create fabricate-terraform \
+  --display-name="Fabricate Terraform"
 
-SA_EMAIL="concoction-terraform@$(gcloud config get-value project).iam.gserviceaccount.com"
+SA_EMAIL="fabricate-terraform@$(gcloud config get-value project).iam.gserviceaccount.com"
 
 # Grant required roles
 for ROLE in \
@@ -73,11 +73,11 @@ for ROLE in \
 done
 
 # Create and download a key
-gcloud iam service-accounts keys create ~/concoction-terraform-key.json \
+gcloud iam service-accounts keys create ~/fabricate-terraform-key.json \
   --iam-account="${SA_EMAIL}"
 
 # Activate the service account (for Terraform)
-export GOOGLE_APPLICATION_CREDENTIALS=~/concoction-terraform-key.json
+export GOOGLE_APPLICATION_CREDENTIALS=~/fabricate-terraform-key.json
 ```
 
 ---
@@ -92,9 +92,9 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars` — **never commit this file**:
 
 ```hcl
-project_id   = "concoction-prod"   # Your GCP project ID
+project_id   = "fabricate-prod"   # Your GCP project ID
 region       = "europe-west2"
-project_name = "concoction"
+project_name = "fabricate"
 environment  = "prod"
 
 # Set after first apply (see section 5):
@@ -125,7 +125,7 @@ Get the registry URL:
 
 ```bash
 terraform output artifact_registry_url
-# → europe-west2-docker.pkg.dev/concoction-prod/concoction
+# → europe-west2-docker.pkg.dev/fabricate-prod/fabricate
 ```
 
 ---
@@ -136,15 +136,15 @@ From the **repository root**:
 
 ```bash
 # Build
-docker build -t concoction:latest .
+docker build -t fabricate:latest .
 
 # Configure Docker to use Artifact Registry
 gcloud auth configure-docker europe-west2-docker.pkg.dev
 
 # Tag and push
 REGISTRY=$(cd infra/gcp && terraform output -raw artifact_registry_url)
-docker tag concoction:latest ${REGISTRY}/concoction:latest
-docker push ${REGISTRY}/concoction:latest
+docker tag fabricate:latest ${REGISTRY}/fabricate:latest
+docker push ${REGISTRY}/fabricate:latest
 ```
 
 ---
@@ -168,10 +168,10 @@ Terraform will:
 Expected output after apply:
 
 ```
-api_url               = "https://concoction-prod-abc123-ew.a.run.app"
-artifact_registry_url = "europe-west2-docker.pkg.dev/concoction-prod/concoction"
+api_url               = "https://fabricate-prod-abc123-ew.a.run.app"
+artifact_registry_url = "europe-west2-docker.pkg.dev/fabricate-prod/fabricate"
 cloud_sql_ip          = "34.89.xxx.xxx"
-service_account_email = "concoction-prod-sa@concoction-prod.iam.gserviceaccount.com"
+service_account_email = "fabricate-prod-sa@fabricate-prod.iam.gserviceaccount.com"
 ```
 
 ---
@@ -192,7 +192,7 @@ curl -H "X-Api-Key: cnc_your-secret-bootstrap-key" \
 Run smoke tests manually:
 
 ```bash
-dotnet test Concoction.Tests.Smoke \
+dotnet test Fabricate.Tests.Smoke \
   -e SMOKE_API_BASE_URL=${API_URL} \
   -e SMOKE_API_KEY=cnc_your-secret-bootstrap-key
 ```
@@ -222,7 +222,7 @@ Add **repository variables**:
 
 | Variable | Value |
 |---|---|
-| `GCP_PROJECT_ID` | e.g. `concoction-prod` |
+| `GCP_PROJECT_ID` | e.g. `fabricate-prod` |
 | `GCP_REGION` | `europe-west2` |
 
 Trigger a deployment:
@@ -237,29 +237,29 @@ GitHub → Actions → Deploy → Run workflow → cloud: gcp
 
 ```bash
 # Stream Cloud Run logs
-gcloud run services logs tail concoction-prod \
+gcloud run services logs tail fabricate-prod \
   --region europe-west2 \
-  --project concoction-prod
+  --project fabricate-prod
 
 # Describe the Cloud Run service
-gcloud run services describe concoction-prod \
+gcloud run services describe fabricate-prod \
   --region europe-west2 \
   --format="yaml(status)"
 
 # Force new Cloud Run revision (after pushing a new image)
-gcloud run services update concoction-prod \
+gcloud run services update fabricate-prod \
   --region europe-west2 \
-  --image europe-west2-docker.pkg.dev/concoction-prod/concoction/concoction:latest
+  --image europe-west2-docker.pkg.dev/fabricate-prod/fabricate/fabricate:latest
 
 # List Cloud SQL instances
 gcloud sql instances list
 
 # Connect to Cloud SQL (via Cloud SQL Auth Proxy)
-gcloud sql connect concoction-prod-psql --user=concoction
+gcloud sql connect fabricate-prod-psql --user=fabricate
 
 # View a secret version
 gcloud secrets versions access latest \
-  --secret concoction-prod-bootstrap-api-key
+  --secret fabricate-prod-bootstrap-api-key
 ```
 
 ---
@@ -276,7 +276,7 @@ terraform destroy
 To delete the entire project (removes all resources and billing):
 
 ```bash
-gcloud projects delete concoction-prod
+gcloud projects delete fabricate-prod
 ```
 
 ---
@@ -288,6 +288,6 @@ gcloud projects delete concoction-prod
 | `PERMISSION_DENIED` during apply | Missing IAM role | Add missing role to service account (see section 2.4) |
 | Cloud Run returns 403 | Missing `allUsers` invoker binding | Terraform applies it; check `google_cloud_run_v2_service_iam_member.public` |
 | Container fails to pull image | SA lacks registry access | Verify `roles/artifactregistry.reader` on SA |
-| `CONCOCTION__BootstrapApiKey` not set | Secret version not accessible | Check SA has `roles/secretmanager.secretAccessor` |
+| `FABRICATE__BootstrapApiKey` not set | Secret version not accessible | Check SA has `roles/secretmanager.secretAccessor` |
 | Cloud SQL connection refused | Wrong IP / firewall | `authorized_networks` in Terraform allows `0.0.0.0/0` for simplicity; check it's applied |
 | `API not enabled` error | APIs not yet enabled | Re-run `terraform apply -target=google_project_service.apis` |

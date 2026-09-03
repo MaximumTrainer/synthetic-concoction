@@ -1,6 +1,6 @@
 # REST API Reference
 
-The Concoction REST API is an ASP.NET Core Minimal API. It listens on port 5000 by default and exposes Swagger UI at `/swagger`.
+The Fabricate REST API is an ASP.NET Core Minimal API. It listens on port 5000 by default and exposes Swagger UI at `/swagger`.
 
 ## Authentication
 
@@ -503,7 +503,7 @@ All error responses follow the RFC 7807 Problem Details format:
 ## Starting the API Locally
 
 ```bash
-dotnet run --project ./Concoction.Api/Concoction.Api.csproj
+dotnet run --project ./Fabricate.Api/Fabricate.Api.csproj
 ```
 
-The API uses SQLite at `concoction.db` in the working directory by default. To use PostgreSQL, set the connection string via environment variables or `appsettings.json`.
+The API uses SQLite at `fabricate.db` in the working directory by default. To use PostgreSQL, set the connection string via environment variables or `appsettings.json`.

@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TypeScript SDK — Concoction</title>
+<title>TypeScript SDK — Fabricate</title>
 <style></style>
 </head>
 <body>
 <nav>
-  <a href="../index.html" class="nav-brand">&#9879; Concoction</a>
+  <a href="../index.html" class="nav-brand">&#9879; Fabricate</a>
   <ul class="nav-links">
     <li><a href="../user-guide.html">User Guide</a></li>
     <li><a href="cli-quickstart.html">CLI</a></li>
@@ -14,24 +14,24 @@
     <li><a href="compliance-profiles.html">Compliance</a></li>
     <li><a href="rest-api.html">API</a></li>
     <li><a href="typescript-sdk.html">TypeScript SDK</a></li>
-    <li><a href="https://github.com/MaximumTrainer/concoction">GitHub</a></li>
+    <li><a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></li>
   </ul>
 </nav>
 <div class="page">
 <h1>TypeScript SDK</h1>
-<p>The <code>@concoction/client</code> npm package provides a fully-typed client for the Concoction REST API. Ships as CJS + ESM + TypeScript declaration files.</p>
+<p>The <code>@fabricate/client</code> npm package provides a fully-typed client for the Fabricate REST API. Ships as CJS + ESM + TypeScript declaration files.</p>
 
 <h2 id="install">Installation</h2>
-<pre><code>npm install @concoction/client</code></pre>
+<pre><code>npm install @fabricate/client</code></pre>
 <p>Or build from source:</p>
 <pre><code>cd sdk/typescript
 npm install
 npm run build</code></pre>
 
 <h2 id="quickstart">Quick Start</h2>
-<pre><code>import { ConcoctionClient, ConcoctionError } from "@concoction/client";
+<pre><code>import { FabricateClient, FabricateError } from "@fabricate/client";
 
-const client = new ConcoctionClient({
+const client = new FabricateClient({
   baseUrl: "http://localhost:5000",
   apiKey:  "cnc_yoursecrethere",
 });
@@ -41,8 +41,8 @@ const workspace = await client.createWorkspace(account.id, "Production Clone");
 const project   = await client.createProject(workspace.id, "Orders Dataset");</code></pre>
 
 <h2 id="constructor">Constructor Options</h2>
-<pre><code>interface ConcoctionClientOptions {
-  /** Base URL of the Concoction API */
+<pre><code>interface FabricateClientOptions {
+  /** Base URL of the Fabricate API */
   baseUrl: string;
   /** API key sent as X-Api-Key header */
   apiKey: string;
@@ -98,7 +98,7 @@ const project   = await client.createProject(workspace.id, "Orders Dataset");</c
 <pre><code>await client.cancelRun("run-abc123");</code></pre>
 
 <h4>pollRun(runId, options?)</h4>
-<p>Polls until terminal state. Throws <code>ConcoctionError</code> on failure, cancellation, or timeout.</p>
+<p>Polls until terminal state. Throws <code>FabricateError</code> on failure, cancellation, or timeout.</p>
 <pre><code>const { runId } = await client.runWorkflow(workflow.id);
 const completed = await client.pollRun(runId, {
   intervalMs: 3000,    // default 2000
@@ -152,7 +152,7 @@ console.log(result.secret); // cnc_abc123... — shown once only</code></pre>
 <pre><code>try {
   const account = await client.getAccount("non-existent");
 } catch (err) {
-  if (err instanceof ConcoctionError) {
+  if (err instanceof FabricateError) {
     console.error(HTTP +""+\+""+: +""+\+"");
     console.error(err.detail);
   }
@@ -167,10 +167,10 @@ console.log(result.secret); // cnc_abc123... — shown once only</code></pre>
 <h2 id="types">Exported Types</h2>
 <pre><code>import type {
   Account, AccountMembership, ApiKey, ApiKeyCreateResult,
-  ChatMessage, ChatSession, ConcoctionClientOptions,
+  ChatMessage, ChatSession, FabricateClientOptions,
   DatasetRun, PaginatedResult, Project, Workspace,
   Workflow, ComplianceProfile,
-} from "@concoction/client";</code></pre>
+} from "@fabricate/client";</code></pre>
 
 <h2 id="build">Building from Source</h2>
 <pre><code>cd sdk/typescript
@@ -183,12 +183,12 @@ npm run build</code></pre>
   new Response(JSON.stringify({ id: "acc-1", name: "Test" }), { status: 200 })
 );
 
-const client = new ConcoctionClient({
+const client = new FabricateClient({
   baseUrl: "http://localhost:5000",
   apiKey:  "cnc_test",
   fetch:   mockFetch,
 });</code></pre>
 </div>
-<footer><p>&copy; 2024 Concoction contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/concoction">GitHub</a></p></footer>
+<footer><p>&copy; 2024 Fabricate contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></p></footer>
 </body>
 </html>

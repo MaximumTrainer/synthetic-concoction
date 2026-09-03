@@ -1,6 +1,6 @@
 # Azure Deployment Setup Guide
 
-Step-by-step guide to deploying Concoction on **Azure** using Container Apps, PostgreSQL Flexible Server, ACR, and Key Vault in `uksouth`.
+Step-by-step guide to deploying Fabricate on **Azure** using Container Apps, PostgreSQL Flexible Server, ACR, and Key Vault in `uksouth`.
 
 ---
 
@@ -40,7 +40,7 @@ az account show --output table
 
 ```bash
 az ad sp create-for-rbac \
-  --name "concoction-terraform" \
+  --name "fabricate-terraform" \
   --role "Contributor" \
   --scopes /subscriptions/<subscription-id> \
   --sdk-auth
@@ -72,8 +72,8 @@ Edit `terraform.tfvars` — **never commit this file**:
 
 ```hcl
 location            = "uksouth"
-resource_group_name = "rg-concoction"
-project_name        = "concoction"
+resource_group_name = "rg-fabricate"
+project_name        = "fabricate"
 environment         = "prod"
 
 # Set after first apply (see section 5):
@@ -111,7 +111,7 @@ Get the registry details:
 
 ```bash
 terraform output acr_login_server
-# → concoctionprodacr.azurecr.io
+# → fabricateprodacr.azurecr.io
 ```
 
 ---
@@ -122,15 +122,15 @@ From the **repository root**:
 
 ```bash
 # Build
-docker build -t concoction:latest .
+docker build -t fabricate:latest .
 
 # Authenticate Docker with ACR
 ACR=$(cd infra/azure && terraform output -raw acr_login_server)
 az acr login --name ${ACR%%.*}
 
 # Tag and push
-docker tag concoction:latest ${ACR}/concoction:latest
-docker push ${ACR}/concoction:latest
+docker tag fabricate:latest ${ACR}/fabricate:latest
+docker push ${ACR}/fabricate:latest
 ```
 
 The `image_tag` variable defaults to `latest` so no update is required for a first deploy.
@@ -157,9 +157,9 @@ Terraform will:
 Expected output after apply:
 
 ```
-api_url            = "https://concoction-prod-api.uksouth.azurecontainerapps.io"
-acr_login_server   = "concoctionprodacr.azurecr.io"
-postgresql_fqdn    = "concoction-prod-psql.postgres.database.azure.com"
+api_url            = "https://fabricate-prod-api.uksouth.azurecontainerapps.io"
+acr_login_server   = "fabricateprodacr.azurecr.io"
+postgresql_fqdn    = "fabricate-prod-psql.postgres.database.azure.com"
 ```
 
 ---
@@ -180,7 +180,7 @@ curl -H "X-Api-Key: cnc_your-secret-bootstrap-key" \
 Run smoke tests manually:
 
 ```bash
-dotnet test Concoction.Tests.Smoke \
+dotnet test Fabricate.Tests.Smoke \
   -e SMOKE_API_BASE_URL=${API_URL} \
   -e SMOKE_API_KEY=cnc_your-secret-bootstrap-key
 ```
@@ -207,7 +207,7 @@ Add **repository variables**:
 
 | Variable | Value |
 |---|---|
-| `ACR_LOGIN_SERVER` | e.g. `concoctionprodacr.azurecr.io` |
+| `ACR_LOGIN_SERVER` | e.g. `fabricateprodacr.azurecr.io` |
 | `AZURE_LOCATION` | `uksouth` |
 
 Trigger a deployment:
@@ -223,26 +223,26 @@ GitHub → Actions → Deploy → Run workflow → cloud: azure
 ```bash
 # View Container App logs (stream)
 az containerapp logs show \
-  --name concoction-prod-api \
-  --resource-group rg-concoction \
+  --name fabricate-prod-api \
+  --resource-group rg-fabricate \
   --follow
 
 # List Container App revisions
 az containerapp revision list \
-  --name concoction-prod-api \
-  --resource-group rg-concoction \
+  --name fabricate-prod-api \
+  --resource-group rg-fabricate \
   --output table
 
 # Force a new revision after pushing an image
 az containerapp update \
-  --name concoction-prod-api \
-  --resource-group rg-concoction \
-  --image concoctionprodacr.azurecr.io/concoction:latest
+  --name fabricate-prod-api \
+  --resource-group rg-fabricate \
+  --image fabricateprodacr.azurecr.io/fabricate:latest
 
 # Show PostgreSQL connection details
 az postgres flexible-server show \
-  --name concoction-prod-psql \
-  --resource-group rg-concoction \
+  --name fabricate-prod-psql \
+  --resource-group rg-fabricate \
   --query "{fqdn:fullyQualifiedDomainName, adminLogin:administratorLogin}"
 ```
 
@@ -258,7 +258,7 @@ terraform destroy
 Or destroy the entire resource group (faster):
 
 ```bash
-az group delete --name rg-concoction --yes --no-wait
+az group delete --name rg-fabricate --yes --no-wait
 ```
 
 ---
@@ -268,7 +268,7 @@ az group delete --name rg-concoction --yes --no-wait
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Container App fails to start | Image pull error | Check managed identity has `AcrPull` role on ACR |
-| 401 on all API calls | Bootstrap key not injected | Verify Key Vault secret and Container App env var `CONCOCTION__BootstrapApiKey` |
+| 401 on all API calls | Bootstrap key not injected | Verify Key Vault secret and Container App env var `FABRICATE__BootstrapApiKey` |
 | PostgreSQL connection refused | Firewall rule | Terraform adds `allow-azure-services` rule; check it's present |
 | Terraform Key Vault error | Soft-delete conflict | Purge previously deleted vault: `az keyvault purge --name <vault>` |
 | `AuthorizationFailed` during apply | Missing role | Ensure SP has Contributor + Key Vault Administrator on subscription |

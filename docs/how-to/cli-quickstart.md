@@ -1,11 +1,11 @@
 # CLI Quick Start: Generate Synthetic Data for a SQLite Database
 
-This guide walks you through using all five Concoction CLI commands against a sample SQLite database.
+This guide walks you through using all five Fabricate CLI commands against a sample SQLite database.
 
 ## Prerequisites
 
 - .NET 10 SDK installed
-- Repository cloned and built (`dotnet build Concoction.slnx`)
+- Repository cloned and built (`dotnet build Fabricate.slnx`)
 
 ## Step 1: Create a Sample SQLite Database
 
@@ -39,7 +39,7 @@ SQL
 ## Step 2: Discover the Schema
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- discover \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --database sample \
@@ -72,7 +72,7 @@ You will see JSON output listing all three tables with their columns, PKs, FKs, 
 The `discover-profile` command surfaces diagnostics about the schema — self-referencing FKs, cycles, and unmapped types.
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover-profile \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- discover-profile \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --database sample
@@ -122,7 +122,7 @@ tables:
 Run the full generation pipeline with the rules file:
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --database sample \
@@ -195,7 +195,7 @@ cat artifacts/summary.json
 The `validate` command runs generation and validation only — no files are written.
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- validate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- validate \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --seed 42 \
@@ -209,7 +209,7 @@ Exit code 0 means clean. Exit code 3 means validation issues were found (details
 Use the `export` command to generate and write one format only:
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- export \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- export \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --seed 42 \

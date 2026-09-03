@@ -1,4 +1,4 @@
-// Types matching the Concoction REST API
+// Types matching the Fabricate REST API
 
 export interface Account {
   id: string;
@@ -86,8 +86,8 @@ export interface PaginatedResult<T> {
   pageSize: number;
 }
 
-export interface ConcoctionClientOptions {
-  /** Base URL of the Concoction API, e.g. https://api.example.com */
+export interface FabricateClientOptions {
+  /** Base URL of the Fabricate API, e.g. https://api.example.com */
   baseUrl: string;
   /** API key for authentication (sent as X-Api-Key header) */
   apiKey: string;

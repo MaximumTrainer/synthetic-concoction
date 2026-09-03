@@ -147,8 +147,8 @@ resource "aws_db_instance" "postgres" {
   engine_version          = "16"
   instance_class          = "db.t3.micro"
   allocated_storage       = 20
-  db_name                 = "concoction"
-  username                = "concoction"
+  db_name                 = "fabricate"
+  username                = "fabricate"
   password                = var.db_password
   db_subnet_group_name    = aws_db_subnet_group.main.name
   vpc_security_group_ids  = [aws_security_group.db.id]
@@ -260,11 +260,11 @@ resource "aws_ecs_task_definition" "app" {
     environment = [
       { name = "ASPNETCORE_ENVIRONMENT", value = "Production" },
       { name = "SchemaProvider__Provider", value = "PostgreSQL" },
-      { name = "ConnectionStrings__DefaultConnection", value = "Host=${aws_db_instance.postgres.address};Database=concoction;Username=concoction;Password=${var.db_password}" }
+      { name = "ConnectionStrings__DefaultConnection", value = "Host=${aws_db_instance.postgres.address};Database=fabricate;Username=fabricate;Password=${var.db_password}" }
     ]
 
     secrets = [{
-      name      = "CONCOCTION__BootstrapApiKey"
+      name      = "FABRICATE__BootstrapApiKey"
       valueFrom = aws_secretsmanager_secret.bootstrap_key.arn
     }]
 
@@ -363,7 +363,7 @@ resource "null_resource" "smoke_tests" {
     command = <<-EOT
       echo "Waiting 60s for ECS service to stabilise..."
       sleep 60
-      dotnet test ${path.module}/../../Concoction.Tests.Smoke \
+      dotnet test ${path.module}/../../Fabricate.Tests.Smoke \
         --logger "console;verbosity=normal" \
         -e SMOKE_API_BASE_URL=http://${aws_lb.main.dns_name} \
         -e SMOKE_API_KEY=${var.bootstrap_api_key}

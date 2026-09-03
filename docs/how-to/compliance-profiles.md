@@ -48,7 +48,7 @@ This profile is appropriate for environments where PCI DSS compliance applies to
 
 ```bash
 # Healthcare masking
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider postgres \
   --connection "Host=localhost;Database=prod_clone;Username=dev;Password=dev" \
   --compliance-profile Healthcare \
@@ -56,7 +56,7 @@ dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
   --output ./artifacts
 
 # Finance masking
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider sqlite \
   --connection "Data Source=./finance.db" \
   --compliance-profile Finance \
@@ -118,4 +118,4 @@ Example entry in `summary.json`:
 
 ## Extending Compliance
 
-To add a custom compliance profile, implement the `ISensitiveFieldClassifier` port in `Concoction.Application` and register it in the DI container. Custom profiles can define any masking logic based on column name, `DataKind`, or schema metadata.
+To add a custom compliance profile, implement the `ISensitiveFieldClassifier` port in `Fabricate.Application` and register it in the DI container. Custom profiles can define any masking logic based on column name, `DataKind`, or schema metadata.

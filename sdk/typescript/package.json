@@ -1,7 +1,7 @@
 {
-  "name": "@concoction/client",
+  "name": "@fabricate/client",
   "version": "0.1.0",
-  "description": "TypeScript client SDK for the Concoction synthetic data API",
+  "description": "TypeScript client SDK for the Fabricate synthetic data API",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -25,6 +25,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MaximumTrainer/concoction"
+    "url": "https://github.com/MaximumTrainer/synthetic-fabricate"
   }
 }

@@ -1,8 +1,8 @@
 # Copy to terraform.tfvars and fill in values before running terraform apply.
 
 location            = "uksouth"
-resource_group_name = "rg-concoction"
-project_name        = "concoction"
+resource_group_name = "rg-fabricate"
+project_name        = "fabricate"
 environment         = "prod"
 
 # Image tag — set after docker push to ACR:

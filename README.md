@@ -1,16 +1,16 @@
-# Concoction
+# Fabricate
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen) ![.NET 10](https://img.shields.io/badge/.NET-10-512BD4) ![License](https://img.shields.io/badge/license-MIT-blue)
 
-Concoction is a .NET 10 synthetic data platform that discovers your database schema, generates realistic relational data with full referential integrity, and exports it in CSV, JSON, and SQL formats. It ships as a CLI, a REST API, and a TypeScript SDK, and supports a deterministic seeding model so the same seed always produces the same dataset.
+Fabricate is a .NET 10 synthetic data platform that discovers your database schema, generates realistic relational data with full referential integrity, and exports it in CSV, JSON, and SQL formats. It ships as a CLI, a REST API, and a TypeScript SDK, and supports a deterministic seeding model so the same seed always produces the same dataset.
 
 ### How it works
 
-You can drive the same pipeline through three entry points: the CLI (`discover`, `discover-profile`, `generate`, `validate`, and `export`) for local workflows, the REST API for managed runs, and the TypeScript SDK as a typed client over that API. Regardless of entry point, Concoction follows the same discovery → plan/generate → export flow.
+You can drive the same pipeline through three entry points: the CLI (`discover`, `discover-profile`, `generate`, `validate`, and `export`) for local workflows, the REST API for managed runs, and the TypeScript SDK as a typed client over that API. Regardless of entry point, Fabricate follows the same discovery → plan/generate → export flow.
 
-**Schema discovery.** Concoction connects to a live SQLite or PostgreSQL database and performs a read-only introspection using provider-specific adapters — `sqlite_master` and `pragma_*` views for SQLite; `information_schema` queries for PostgreSQL. For every table it captures column names, SQL types, inferred data kinds (e.g. `Email`, `Integer`, `Guid`), nullability, primary keys, foreign keys, and unique constraints, plus SQLite index metadata. The `discover` command prints this as JSON; `discover-profile` augments it with diagnostics such as self-referencing tables, cycle edges, and unmapped column types.
+**Schema discovery.** Fabricate connects to a live SQLite or PostgreSQL database and performs a read-only introspection using provider-specific adapters — `sqlite_master` and `pragma_*` views for SQLite; `information_schema` queries for PostgreSQL. For every table it captures column names, SQL types, inferred data kinds (e.g. `Email`, `Integer`, `Guid`), nullability, primary keys, foreign keys, and unique constraints, plus SQLite index metadata. The `discover` command prints this as JSON; `discover-profile` augments it with diagnostics such as self-referencing tables, cycle edges, and unmapped column types.
 
-**Relational data generation.** Before producing any rows, Concoction analyses the foreign-key graph and builds a *generation plan*: tables are topologically sorted so parent tables are always populated before their dependents. That plan becomes the working data graph for generation — parent primary keys are collected first, then child tables draw FK values from those already-materialized parent rows so relationships stay consistent. Cycles in the FK graph are detected and broken at an optional FK column, with the cyclic reference backfilled after both sides exist. Self-referencing tables (e.g. `employees.manager_id → employees.id`) are handled with a chain strategy — row 0 gets a null root and each subsequent row references the previous one. All values are produced deterministically from a single integer seed, so the same seed and schema always produce the same dataset. Generation strategies are controlled by inferred data kinds, an optional YAML/JSON Rules DSL (per-column strategy, fixed value, null rate, weighted distribution, JSON-path rules), and a compliance profile (`Default`, `Healthcare`, or `Finance`) that applies masking for sensitive field categories. After generation, Concoction records structured validation issues for rule/constraint checks such as non-nullability, string length, allowed values, uniqueness, and any FK backfill cases it could not safely resolve.
+**Relational data generation.** Before producing any rows, Fabricate analyses the foreign-key graph and builds a *generation plan*: tables are topologically sorted so parent tables are always populated before their dependents. That plan becomes the working data graph for generation — parent primary keys are collected first, then child tables draw FK values from those already-materialized parent rows so relationships stay consistent. Cycles in the FK graph are detected and broken at an optional FK column, with the cyclic reference backfilled after both sides exist. Self-referencing tables (e.g. `employees.manager_id → employees.id`) are handled with a chain strategy — row 0 gets a null root and each subsequent row references the previous one. All values are produced deterministically from a single integer seed, so the same seed and schema always produce the same dataset. Generation strategies are controlled by inferred data kinds, an optional YAML/JSON Rules DSL (per-column strategy, fixed value, null rate, weighted distribution, JSON-path rules), and a compliance profile (`Default`, `Healthcare`, or `Finance`) that applies masking for sensitive field categories. After generation, Fabricate records structured validation issues for rule/constraint checks such as non-nullability, string length, allowed values, uniqueness, and any FK backfill cases it could not safely resolve.
 
 **Export.** The `generate` command writes all three formats to a single output directory, organizing the results by exporter (`csv/`, `json/`, and `sql/`) plus a root `summary.json` artifact. CSV output is RFC-4180 compliant with one file per table and nulls as empty fields; JSON output is one array of row objects per table; SQL output is standard `INSERT` statements with proper quoting, `NULL` literals, and `TRUE`/`FALSE` booleans. The `export` command runs the same generation pipeline but targets a single format when only one artifact set is needed.
 
@@ -23,29 +23,29 @@ You can drive the same pipeline through three entry points: the CLI (`discover`,
 ## Clone & Build
 
 ```bash
-git clone https://github.com/MaximumTrainer/concoction.git
-cd concoction
-dotnet build Concoction.slnx
+git clone https://github.com/MaximumTrainer/synthetic-fabricate.git
+cd synthetic-fabricate
+dotnet build Fabricate.slnx
 ```
 
 ## Run Tests
 
 ```bash
-dotnet test Concoction.slnx
+dotnet test Fabricate.slnx
 ```
 
 81 tests (xUnit + FluentAssertions), all passing.
 
 ## CLI Quick Start
 
-All CLI commands are invoked via `dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj --`.
+All CLI commands are invoked via `dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj --`.
 
 ### discover
 
 Prints the discovered schema as JSON.
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- discover \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --database mydb \
@@ -57,7 +57,7 @@ dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover \
 Profiles the schema and prints diagnostic JSON (self-refs, cycles, unmapped columns).
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover-profile \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- discover-profile \
   --provider sqlite \
   --connection "Data Source=./sample.db"
 ```
@@ -67,7 +67,7 @@ dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover-profile 
 Discovers schema, generates synthetic rows, and writes CSV + JSON + SQL + `summary.json` to `--output`.
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --seed 42 \
@@ -82,7 +82,7 @@ dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
 Generates data and prints a validation summary; exits with code 3 if issues are found.
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- validate \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- validate \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --rows 50
@@ -93,7 +93,7 @@ dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- validate \
 Generates data and exports a single format to `--output`.
 
 ```bash
-dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- export \
+dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- export \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --format csv \
@@ -105,7 +105,7 @@ Supported `--format` values: `json`, `csv`, `sql`.
 ## Running the REST API
 
 ```bash
-dotnet run --project ./Concoction.Api/Concoction.Api.csproj
+dotnet run --project ./Fabricate.Api/Fabricate.Api.csproj
 ```
 
 The API starts on `http://localhost:5000` by default. Swagger UI is available at `http://localhost:5000/swagger`.
@@ -116,19 +116,19 @@ All endpoints require the header `X-Api-Key: cnc_<secret>`. See [docs/how-to/res
 
 | Project | Purpose |
 |---|---|
-| `Concoction.Domain` | Entities, value objects, enums, domain models |
-| `Concoction.Application` | Use cases, port interfaces, orchestration |
-| `Concoction.Infrastructure` | Adapters: SQLite/PostgreSQL providers, CSV/JSON/SQL exporters, in-memory repos |
-| `Concoction.Cli` | `System.CommandLine` CLI (5 commands) |
-| `Concoction.Api` | ASP.NET Core Minimal API (REST, Swagger) |
-| `Concoction.Tests` | 81 xUnit + FluentAssertions tests |
-| `sdk/typescript/` | `@concoction/client` npm package (CJS + ESM + DTS) |
+| `Fabricate.Domain` | Entities, value objects, enums, domain models |
+| `Fabricate.Application` | Use cases, port interfaces, orchestration |
+| `Fabricate.Infrastructure` | Adapters: SQLite/PostgreSQL providers, CSV/JSON/SQL exporters, in-memory repos |
+| `Fabricate.Cli` | `System.CommandLine` CLI (5 commands) |
+| `Fabricate.Api` | ASP.NET Core Minimal API (REST, Swagger) |
+| `Fabricate.Tests` | 81 xUnit + FluentAssertions tests |
+| `sdk/typescript/` | `@fabricate/client` npm package (CJS + ESM + DTS) |
 
-## Extending Concoction
+## Extending Fabricate
 
 ### Register a Custom Generator
 
-Implement `IDataGenerator` in `Concoction.Application`, register it in the DI container via `ServiceCollectionExtensions`, and map your new `DataKind` values to it.
+Implement `IDataGenerator` in `Fabricate.Application`, register it in the DI container via `ServiceCollectionExtensions`, and map your new `DataKind` values to it.
 
 ### Custom Rules
 
@@ -153,7 +153,7 @@ Pull requests are welcome. All contributions must:
 
 1. Follow **Red → Green → Refactor** TDD.
 2. Respect **hexagonal architecture** — no infrastructure imports in Domain or Application.
-3. Pass `dotnet test Concoction.slnx` with no new failures.
+3. Pass `dotnet test Fabricate.slnx` with no new failures.
 4. Keep new public APIs covered by tests.
 
 See [docs/user-guide.md](docs/user-guide.md) for full platform documentation.

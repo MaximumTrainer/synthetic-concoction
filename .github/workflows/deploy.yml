@@ -19,7 +19,7 @@ on:
 
 env:
   DOTNET_VERSION: "10.0.x"
-  IMAGE_NAME: concoction
+  IMAGE_NAME: fabricate
 
 jobs:
   # ──────────────────────────────────────────
@@ -131,11 +131,11 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore smoke test project
-        run: dotnet restore ../../Concoction.Tests.Smoke/Concoction.Tests.Smoke.csproj
+        run: dotnet restore ../../Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj
         working-directory: infra/aws
 
       - name: Build smoke test project
-        run: dotnet build ../../Concoction.Tests.Smoke/Concoction.Tests.Smoke.csproj -c Release --no-restore
+        run: dotnet build ../../Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj -c Release --no-restore
         working-directory: infra/aws
 
       - name: Configure AWS credentials
@@ -159,7 +159,7 @@ jobs:
         env:
           TF_VAR_aws_region: ${{ vars.AWS_REGION || 'eu-west-2' }}
           TF_VAR_environment: ${{ inputs.environment }}
-          TF_VAR_image_uri: "${{ steps.ecr.outputs.registry }}/concoction-${{ inputs.environment }}:${{ needs.build-and-push.outputs.image_tag }}"
+          TF_VAR_image_uri: "${{ steps.ecr.outputs.registry }}/fabricate-${{ inputs.environment }}:${{ needs.build-and-push.outputs.image_tag }}"
           TF_VAR_db_password: ${{ secrets.AWS_DB_PASSWORD }}
           TF_VAR_bootstrap_api_key: ${{ secrets.BOOTSTRAP_API_KEY }}
         run: terraform apply -auto-approve
@@ -187,10 +187,10 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore smoke test project
-        run: dotnet restore ../../Concoction.Tests.Smoke/Concoction.Tests.Smoke.csproj
+        run: dotnet restore ../../Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj
 
       - name: Build smoke test project
-        run: dotnet build ../../Concoction.Tests.Smoke/Concoction.Tests.Smoke.csproj -c Release --no-restore
+        run: dotnet build ../../Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj -c Release --no-restore
 
       - name: Azure Login
         uses: azure/login@v2
@@ -239,10 +239,10 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore smoke test project
-        run: dotnet restore ../../Concoction.Tests.Smoke/Concoction.Tests.Smoke.csproj
+        run: dotnet restore ../../Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj
 
       - name: Build smoke test project
-        run: dotnet build ../../Concoction.Tests.Smoke/Concoction.Tests.Smoke.csproj -c Release --no-restore
+        run: dotnet build ../../Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj -c Release --no-restore
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2

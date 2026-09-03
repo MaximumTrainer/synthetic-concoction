@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CLI Quick Start — Concoction</title>
+<title>CLI Quick Start — Fabricate</title>
 <style></style>
 </head>
 <body>
 <nav>
-  <a href="../index.html" class="nav-brand">&#9879; Concoction</a>
+  <a href="../index.html" class="nav-brand">&#9879; Fabricate</a>
   <ul class="nav-links">
     <li><a href="../user-guide.html">User Guide</a></li>
     <li><a href="cli-quickstart.html">CLI</a></li>
@@ -14,7 +14,7 @@
     <li><a href="compliance-profiles.html">Compliance</a></li>
     <li><a href="rest-api.html">API</a></li>
     <li><a href="typescript-sdk.html">TypeScript SDK</a></li>
-    <li><a href="https://github.com/MaximumTrainer/concoction">GitHub</a></li>
+    <li><a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></li>
   </ul>
 </nav>
 <div class="page">
@@ -24,7 +24,7 @@
 <h2 id="prereqs">Prerequisites</h2>
 <ul>
   <li>.NET 10 SDK installed</li>
-  <li>Repository cloned and built: <code>dotnet build Concoction.slnx</code></li>
+  <li>Repository cloned and built: <code>dotnet build Fabricate.slnx</code></li>
   <li><code>sqlite3</code> CLI (or any SQLite client)</li>
 </ul>
 
@@ -51,7 +51,7 @@ CREATE TABLE orders (
 SQL</code></pre>
 
 <h2 id="step2">Step 2: Discover the Schema</h2>
-<pre><code>dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover \
+<pre><code>dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- discover \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --database sample \
@@ -60,7 +60,7 @@ SQL</code></pre>
 
 <h2 id="step3">Step 3: Profile the Schema</h2>
 <p><code>discover-profile</code> surfaces diagnostics: self-referencing FKs, cycles, and unmapped types.</p>
-<pre><code>dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- discover-profile \
+<pre><code>dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- discover-profile \
   --provider sqlite \
   --connection "Data Source=./sample.db"</code></pre>
 <p>Exit code 1 if diagnostics found. Expect a diagnostic noting <code>employees.manager_id</code> is a self-referencing FK.</p>
@@ -86,7 +86,7 @@ tables:
           "99.99": 0.25</code></pre>
 
 <h2 id="step5">Step 5: Generate Data</h2>
-<pre><code>dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- generate \
+<pre><code>dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- generate \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --database sample \
@@ -127,7 +127,7 @@ tables:
 }</code></pre>
 
 <h2 id="step6">Step 6: Validate Without Exporting</h2>
-<pre><code>dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- validate \
+<pre><code>dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- validate \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --seed 42 \
@@ -135,7 +135,7 @@ tables:
 <p>Exit code 0 = clean. Exit code 3 = validation issues (details on stderr).</p>
 
 <h2 id="step7">Step 7: Export a Single Format</h2>
-<pre><code>dotnet run --project ./Concoction.Cli/Concoction.Cli.csproj -- export \
+<pre><code>dotnet run --project ./Fabricate.Cli/Fabricate.Cli.csproj -- export \
   --provider sqlite \
   --connection "Data Source=./sample.db" \
   --seed 42 \
@@ -165,6 +165,6 @@ VALUES (2,1,'bob@example.com','Bob Smith',1,'active');</code></pre>
   <li><a href="rest-api.html">REST API How-To</a></li>
 </ul>
 </div>
-<footer><p>&copy; 2024 Concoction contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/concoction">GitHub</a></p></footer>
+<footer><p>&copy; 2024 Fabricate contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></p></footer>
 </body>
 </html>
