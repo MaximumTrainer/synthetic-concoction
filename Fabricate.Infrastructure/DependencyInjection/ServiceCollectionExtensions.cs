@@ -201,6 +201,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILlmCredentialProbe, ChatCompletionCredentialProbe>();
         services.AddSingleton<ILlmCredentialResolver, LlmCredentialResolver>();
         services.AddSingleton<ILlmCredentialService, LlmCredentialService>();
+        services.AddSingleton<ITokenBudgetEstimator, HeuristicTokenBudgetEstimator>();
 
         return services;
     }

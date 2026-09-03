@@ -86,7 +86,7 @@ public sealed class LlmOptionsTests
     {
         var options = FromEnv(
             ("PROVIDER", "anthropic"), ("MODEL", "claude-opus-5"), ("ALLOWED_MODELS", "claude-opus-5, claude-sonnet-5"),
-            ("API_KEY_SECRET", "ANTHROPIC_API_KEY"), ("EFFORT", "high"), ("MAX_OUTPUT_TOKENS", "8000"),
+            ("API_KEY_SECRET", "ANTHROPIC_API_KEY"), ("EFFORT", "high"), ("MAX_OUTPUT_TOKENS", "8000"), ("MAX_INPUT_TOKENS", "50000"),
             ("PLATFORM_FALLBACK", "always"), ("ALLOWED_ENDPOINT_HOSTS", "openai.com,anthropic.com"), ("ALLOW_PRIVATE_ENDPOINTS", "true"));
 
         options.Validate().Should().BeEmpty();
@@ -94,6 +94,7 @@ public sealed class LlmOptionsTests
         options.AllowedModels.Should().Equal("claude-opus-5", "claude-sonnet-5");
         options.Effort.Should().Be(LlmEffort.High);
         options.MaxOutputTokens.Should().Be(8000);
+        options.MaxInputTokens.Should().Be(50000);
         options.PlatformFallback.Should().Be(PlatformFallbackMode.Always);
         options.AllowedEndpointHosts.Should().Equal("openai.com", "anthropic.com");
         options.AllowPrivateEndpoints.Should().BeTrue();

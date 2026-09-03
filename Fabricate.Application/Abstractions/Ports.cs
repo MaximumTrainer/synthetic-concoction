@@ -378,6 +378,16 @@ public sealed record ChatTurnResult(
     TokenUsage Usage,
     LlmStopReason? StopReason);
 
+/// <summary>Outcome of approving a parked tool call. <see cref="Continuation"/> is set when the approval unblocked the model loop.</summary>
+public sealed record ToolApprovalResult(ToolInvocation Invocation, ChatTurnResult? Continuation);
+
+/// <summary>Estimates the input-token cost of a request so history can be trimmed to a budget before it is sent.</summary>
+public interface ITokenBudgetEstimator
+{
+    int Estimate(ChatCompletionRequest request);
+    int Estimate(LlmMessage message);
+}
+
 /// <summary>Incremental events emitted while a turn streams.</summary>
 public abstract record ChatStreamEvent
 {
@@ -402,8 +412,12 @@ public interface IAgentChatService
     /// <summary>Same as <see cref="SendMessageAsync"/> but yields incremental events; the last event is always <see cref="ChatStreamEvent.Completed"/>.</summary>
     IAsyncEnumerable<ChatStreamEvent> StreamMessageAsync(SendMessageCommand command, CancellationToken cancellationToken = default);
 
-    /// <summary>Executes a tool call that was parked as <see cref="ToolInvocationStatus.Pending"/> under <see cref="ChatMode.ReviewRequired"/>.</summary>
-    Task<ToolInvocation> ApproveToolInvocationAsync(Guid sessionId, Guid invocationId, Guid requestingUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Executes a tool call that was parked as <see cref="ToolInvocationStatus.Pending"/> under <see cref="ChatMode.ReviewRequired"/>.
+    /// Once no call in the session is pending, the model loop resumes with the tool results and the resulting turn is returned as
+    /// <see cref="ToolApprovalResult.Continuation"/>.
+    /// </summary>
+    Task<ToolApprovalResult> ApproveToolInvocationAsync(Guid sessionId, Guid invocationId, Guid requestingUserId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ChatMessage>> GetHistoryAsync(Guid sessionId, Guid requestingUserId, int pageSize = 50, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ToolInvocation>> GetToolInvocationsAsync(Guid sessionId, Guid requestingUserId, CancellationToken cancellationToken = default);

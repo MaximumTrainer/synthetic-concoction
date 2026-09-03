@@ -34,6 +34,8 @@ public sealed class LlmOptions
     public LlmEffort? Effort { get; set; }
     public int MaxToolIterations { get; set; } = 8;
     public int HistoryWindow { get; set; } = 40;
+    /// <summary>Estimated input-token budget per request; oldest history is dropped to fit. Zero disables trimming.</summary>
+    public int MaxInputTokens { get; set; } = 120_000;
     public PlatformFallbackMode PlatformFallback { get; set; } = PlatformFallbackMode.WorkspaceOptIn;
     /// <summary>Hosts that tenant-supplied endpoints may target. Empty means any public HTTPS host.</summary>
     public IReadOnlyList<string> AllowedEndpointHosts { get; set; } = [];
@@ -82,6 +84,7 @@ public sealed class LlmOptions
         if (int.TryParse(Get("TIMEOUT_SECONDS"), out var timeout)) options.TimeoutSeconds = timeout;
         if (int.TryParse(Get("MAX_TOOL_ITERATIONS"), out var iterations)) options.MaxToolIterations = iterations;
         if (int.TryParse(Get("HISTORY_WINDOW"), out var window)) options.HistoryWindow = window;
+        if (int.TryParse(Get("MAX_INPUT_TOKENS"), out var maxInput)) options.MaxInputTokens = maxInput;
         if (Enum.TryParse<LlmEffort>(Get("EFFORT"), ignoreCase: true, out var effort)) options.Effort = effort;
         if (bool.TryParse(Get("ALLOW_PRIVATE_ENDPOINTS"), out var allowPrivate)) options.AllowPrivateEndpoints = allowPrivate;
 
@@ -159,6 +162,7 @@ public sealed class LlmOptions
         if (MaxOutputTokens <= 0) errors.Add($"{EnvPrefix}MAX_OUTPUT_TOKENS must be positive.");
         if (TimeoutSeconds <= 0) errors.Add($"{EnvPrefix}TIMEOUT_SECONDS must be positive.");
         if (MaxToolIterations <= 0) errors.Add($"{EnvPrefix}MAX_TOOL_ITERATIONS must be positive.");
+        if (MaxInputTokens < 0) errors.Add($"{EnvPrefix}MAX_INPUT_TOKENS must be zero (unlimited) or positive.");
 
         return errors;
     }
