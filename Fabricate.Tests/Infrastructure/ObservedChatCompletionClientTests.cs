@@ -143,17 +143,25 @@ public sealed class ObservedChatCompletionClientTests
         {
             Attempts++;
             var step = _script.Dequeue();
-            ChatCompletionResult result;
+            ChatCompletionResult? result = null;
+            var brokeMidStream = false;
             try
             {
                 result = await step();
             }
             catch (MidStreamFailure)
             {
+                brokeMidStream = true;
+            }
+
+            if (brokeMidStream)
+            {
+                // A chunk reaches the caller, then the stream dies: the decorator must not restart it.
                 yield return new ChatCompletionChunk("partial ");
                 throw new LlmProviderException(LlmFailureKind.Transport, "stream broke half way");
             }
-            yield return new ChatCompletionChunk(result.Text);
+
+            yield return new ChatCompletionChunk(result!.Text);
             yield return new ChatCompletionChunk(null, result);
         }
     }
