@@ -148,7 +148,7 @@ public sealed class DynamoDbSchemaDiscoverer : INoSqlSchemaDiscoverer
 
     private static (DocumentFieldType Type, bool IsNull) GetAttributeType(AttributeValue attr)
     {
-        if (attr.NULL) return (DocumentFieldType.Null, true);
+        if (attr.NULL == true) return (DocumentFieldType.Null, true);
         if (attr.S is not null) return (DocumentFieldType.String, false);
         if (attr.N is not null) return (DocumentFieldType.Number, false);
         if (attr.B is not null) return (DocumentFieldType.Binary, false);

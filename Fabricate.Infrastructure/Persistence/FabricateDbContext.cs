@@ -19,6 +19,8 @@ public sealed class FabricateDbContext(DbContextOptions<FabricateDbContext> opti
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ToolInvocation> ToolInvocations => Set<ToolInvocation>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+    public DbSet<LlmCredential> LlmCredentials => Set<LlmCredential>();
+    public DbSet<WorkspaceLlmPolicy> WorkspaceLlmPolicies => Set<WorkspaceLlmPolicy>();
 
     // Store all DateTimeOffset values as UTC ticks (long) so SQLite ORDER BY works correctly.
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -130,6 +132,31 @@ public sealed class FabricateDbContext(DbContextOptions<FabricateDbContext> opti
                 .HasConversion(
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
                     v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null)!);
+        });
+
+        // LlmCredential — CipherText only; the plaintext never reaches this layer. Names are unique among
+        // live credentials per workspace, so a revoked name can be registered again.
+        modelBuilder.Entity<LlmCredential>(e =>
+        {
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Name).IsRequired().HasMaxLength(200);
+            e.Property(c => c.CipherText).IsRequired();
+            e.Property(c => c.KeyVersion).IsRequired().HasMaxLength(50);
+            e.Property(c => c.Fingerprint).IsRequired().HasMaxLength(64);
+            e.Property(c => c.LastFour).IsRequired().HasMaxLength(8);
+            e.Property(c => c.Endpoint).HasMaxLength(2048);
+            e.Property(c => c.Model).IsRequired().HasMaxLength(200);
+            e.Property(c => c.NonSecretSettings)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v, (System.Text.Json.JsonSerializerOptions?)null)!);
+            e.HasIndex(c => new { c.WorkspaceId, c.Name }).IsUnique().HasFilter("\"RevokedAt\" IS NULL");
+            e.HasIndex(c => c.WorkspaceId);
+        });
+
+        modelBuilder.Entity<WorkspaceLlmPolicy>(e =>
+        {
+            e.HasKey(p => p.WorkspaceId);
         });
     }
 }

@@ -18,6 +18,7 @@ public static class PersistenceServiceCollectionExtensions
         services.AddScoped<IRunRepository, EfRunRepository>();
         services.AddScoped<ISessionRepository, EfSessionRepository>();
         services.AddScoped<IApiKeyStore, EfApiKeyStore>();
+        services.AddScoped<ILlmCredentialStore, EfLlmCredentialStore>();
 
         return services;
     }

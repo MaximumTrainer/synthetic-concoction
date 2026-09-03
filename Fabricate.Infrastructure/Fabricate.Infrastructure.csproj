@@ -12,7 +12,16 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.7.407.11" />
+    <PackageReference Include="AWSSDK.DynamoDBv2" Version="4.0.103.5" />
+    <!-- Official Anthropic .NET SDK plus its cloud-platform clients. Anthropic.Bedrock requires AWSSDK.Core 4.x,
+         which is why AWSSDK.DynamoDBv2 above sits on the 4.x line. -->
+    <PackageReference Include="Anthropic" Version="12.45.0" />
+    <PackageReference Include="Anthropic.Bedrock" Version="0.13.1" />
+    <PackageReference Include="Anthropic.Vertex" Version="0.5.3" />
+    <PackageReference Include="Anthropic.Foundry" Version="0.7.1" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.10" />
+    <!-- GHSA-23rf-6693-g89p et al: DataProtection 9.0.10 pulls System.Security.Cryptography.Xml 9.0.10; pin past the advisories. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
     <PackageReference Include="Google.Cloud.Firestore" Version="3.8.0" />
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
     <!-- SQLitePCLRaw GHSA-2m69-gcr7-jv3q: bundled SQLite is vulnerable at <= 2.1.11.

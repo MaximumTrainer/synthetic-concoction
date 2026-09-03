@@ -8,6 +8,7 @@ using Fabricate.Application.Configuration;
 using Fabricate.Application.Constraints;
 using Fabricate.Application.Generation;
 using Fabricate.Application.Governance;
+using Fabricate.Application.Llm;
 using Fabricate.Application.Orchestration;
 using Fabricate.Application.Planning;
 using Fabricate.Application.Projects;
@@ -17,9 +18,11 @@ using Fabricate.Application.Workflows;
 using Fabricate.Application.Workspaces;
 using Fabricate.Infrastructure.Configuration;
 using Fabricate.Infrastructure.Export;
+using Fabricate.Infrastructure.Llm;
 using Fabricate.Infrastructure.Repositories;
 using Fabricate.Infrastructure.Schema;
 using Fabricate.Infrastructure.Webhooks;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Fabricate.Infrastructure.DependencyInjection;
@@ -164,6 +167,40 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<INoSqlSchemaDiscoverer, DynamoDbSchemaDiscoverer>();
         services.AddSingleton<INoSqlSchemaDiscoverer, FirestoreSchemaDiscoverer>();
         services.AddSingleton<INoSqlSchemaDiscovererFactory, NoSqlSchemaDiscovererFactory>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// LLM provider access and bring-your-own-key credentials (#46/#47/#58/#60). Fails fast on a misconfigured
+    /// platform credential; an unset <c>FABRICATE_LLM_PROVIDER</c> simply disables the platform credential.
+    /// </summary>
+    public static IServiceCollection AddFabricateLlm(this IServiceCollection services, LlmOptions options, string? dataProtectionKeyPath = null)
+    {
+        var errors = options.Validate();
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException("LLM configuration is invalid:\n - " + string.Join("\n - ", errors));
+        }
+
+        services.AddSingleton(options);
+
+        // Tenant secrets are encrypted at rest with Data Protection. The key ring must live outside the
+        // application database so a database dump alone cannot decrypt credentials.
+        var dp = services.AddDataProtection().SetApplicationName("Fabricate");
+        if (!string.IsNullOrWhiteSpace(dataProtectionKeyPath))
+        {
+            dp.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeyPath));
+        }
+
+        services.AddHttpClient(ChatCompletionClientFactory.HttpClientName);
+
+        services.AddSingleton<ISecretCipher, DataProtectionSecretCipher>();
+        services.AddSingleton<ILlmCredentialStore, InMemoryLlmCredentialStore>();
+        services.AddSingleton<IChatCompletionClientFactory, ChatCompletionClientFactory>();
+        services.AddSingleton<ILlmCredentialProbe, ChatCompletionCredentialProbe>();
+        services.AddSingleton<ILlmCredentialResolver, LlmCredentialResolver>();
+        services.AddSingleton<ILlmCredentialService, LlmCredentialService>();
 
         return services;
     }
