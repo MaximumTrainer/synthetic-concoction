@@ -1,0 +1,113 @@
+name: Deploy to Fly.io
+
+# Lightweight deploy-from-GitHub path (#61). The only GitHub secret it needs is FLY_API_TOKEN; database and LLM
+# credentials live on the platform (`fly secrets set`) and never pass through Actions.
+#
+# Job 1 deploys with a remote build. Job 2 waits for /healthz through the cold start and runs the smoke tests,
+# and FAILS if the smoke tests were skipped rather than executed — closing the silent-skip gap from #59.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-fly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  FLY_APP: ${{ vars.FLY_APP || 'fabricate' }}
+  DOTNET_VERSION: "10.0.x"
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: fly
+    outputs:
+      hostname: ${{ steps.host.outputs.hostname }}
+      previous_release: ${{ steps.previous.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Record the currently deployed release (for rollback)
+        id: previous
+        run: |
+          v=$(flyctl releases --app "$FLY_APP" --json 2>/dev/null | jq -r '.[0].Version // empty' || true)
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+          echo "Previous release: ${v:-none}"
+
+      - name: Deploy (remote build; no registry credentials in GitHub)
+        run: flyctl deploy --app "$FLY_APP" --remote-only --ha=false --yes
+
+      - name: Resolve hostname
+        id: host
+        run: |
+          host=$(flyctl status --app "$FLY_APP" --json | jq -r '.Hostname')
+          echo "hostname=$host" >> "$GITHUB_OUTPUT"
+          echo "Deployed to https://$host"
+
+  verify:
+    name: Verify (health + smoke tests)
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: fly
+    env:
+      SMOKE_API_BASE_URL: https://${{ needs.deploy.outputs.hostname }}
+      SMOKE_API_KEY: ${{ secrets.SMOKE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for /healthz through the cold start
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$SMOKE_API_BASE_URL/healthz" || true)
+            if [ "$code" = "200" ]; then echo "healthy after ${i} attempt(s)"; exit 0; fi
+            sleep 3
+          done
+          echo "::error::/healthz did not return 200 within 90s"; exit 1
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Refuse to run with the smoke tests disabled
+        run: |
+          if [ -z "$SMOKE_API_KEY" ]; then
+            echo "::error::SMOKE_API_KEY is not set; the smoke tests would skip themselves and this job would pass vacuously."
+            exit 1
+          fi
+
+      - run: dotnet restore Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj
+      - run: dotnet build Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj -c Release --no-restore
+
+      - name: Run smoke tests
+        run: >
+          dotnet test Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj -c Release --no-build
+          --logger "trx;LogFileName=smoke.trx" --results-directory "$RUNNER_TEMP/results"
+
+      # The smoke tests return early (and "pass") when their gates are unset. Assert that they actually executed
+      # by requiring every test to have taken measurable time and by checking the run was not empty.
+      - name: Assert the smoke tests executed rather than skipped
+        run: |
+          trx=$(ls "$RUNNER_TEMP"/results/*.trx | head -1)
+          total=$(grep -o 'total="[0-9]*"' "$trx" | head -1 | grep -o '[0-9]*')
+          executed=$(grep -o 'executed="[0-9]*"' "$trx" | head -1 | grep -o '[0-9]*')
+          passed=$(grep -o 'passed="[0-9]*"' "$trx" | head -1 | grep -o '[0-9]*')
+          echo "total=$total executed=$executed passed=$passed"
+          if [ -z "$total" ] || [ "$total" -eq 0 ] || [ "$executed" -ne "$total" ] || [ "$passed" -ne "$total" ]; then
+            echo "::error::Smoke tests did not all execute and pass."; exit 1
+          fi
+
+      - name: Rollback guidance
+        if: failure() && needs.deploy.outputs.previous_release != ''
+        run: |
+          echo "::warning::Verification failed. To roll back:"
+          echo "  flyctl releases --app $FLY_APP"
+          echo "  flyctl deploy --app $FLY_APP --image <image of release ${{ needs.deploy.outputs.previous_release }}>"

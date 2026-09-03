@@ -51,15 +51,19 @@ builder.Services.AddFabricateInfrastructure(opts =>
 var llmOptions = LlmOptions.FromEnvironment(Environment.GetEnvironmentVariable);
 builder.Services.AddFabricateLlm(llmOptions, Environment.GetEnvironmentVariable("FABRICATE_DATA_PROTECTION_KEYS_PATH"));
 
-builder.Services.AddHostedService<StartupBootstrapService>();
-
+// Durable persistence: FABRICATE_DB_PROVIDER=postgres (hosted deployments) or sqlite (local); unset keeps the
+// in-memory repositories. Registered before the bootstrap service so migrations run before the seed.
 var dbProvider = Environment.GetEnvironmentVariable("FABRICATE_DB_PROVIDER") ?? "memory";
-if (dbProvider.Equals("sqlite", StringComparison.OrdinalIgnoreCase))
+if (!dbProvider.Equals("memory", StringComparison.OrdinalIgnoreCase))
 {
     var connStr = Environment.GetEnvironmentVariable("FABRICATE_CONNECTION_STRING")
-        ?? "Data Source=fabricate.db";
-    builder.Services.AddFabricatePersistence(connStr);
+        ?? (dbProvider.Equals("sqlite", StringComparison.OrdinalIgnoreCase)
+            ? "Data Source=fabricate.db"
+            : throw new InvalidOperationException("FABRICATE_CONNECTION_STRING is required when FABRICATE_DB_PROVIDER is 'postgres'."));
+    builder.Services.AddFabricatePersistence(dbProvider, connStr);
 }
+
+builder.Services.AddHostedService<StartupBootstrapService>();
 
 var app = builder.Build();
 

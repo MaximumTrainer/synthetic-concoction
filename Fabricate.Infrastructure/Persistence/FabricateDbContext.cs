@@ -4,7 +4,9 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Fabricate.Infrastructure.Persistence;
 
-public sealed class FabricateDbContext(DbContextOptions<FabricateDbContext> options) : DbContext(options)
+// Not sealed: FabricatePostgresDbContext derives from it to own the PostgreSQL migration set. The constructor takes the
+// non-generic options so both the base (SQLite) and the derived context can be constructed from their own options type.
+public class FabricateDbContext(DbContextOptions options) : DbContext(options)
 {
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<AccountMembership> AccountMemberships => Set<AccountMembership>();
