@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Self-hosting Fabricate — Fabricate</title>
+<style></style>
+</head>
+<body>
+<nav>
+  <a href="../index.html" class="nav-brand">&#9879; Fabricate</a>
+  <ul class="nav-links">
+    <li><a href="../user-guide.html">User Guide</a></li>
+    <li><a href="cli-quickstart.html">CLI</a></li>
+    <li><a href="rules-dsl.html">Rules DSL</a></li>
+    <li><a href="compliance-profiles.html">Compliance</a></li>
+    <li><a href="rest-api.html">API</a></li>
+    <li><a href="typescript-sdk.html">TypeScript SDK</a></li>
+    <li><a href="self-hosting.html">Self-hosting</a></li>
+    <li><a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></li>
+  </ul>
+</nav>
+<div class="page">
+<h1>Self-hosting Fabricate</h1>
+<p>Fabricate runs entirely on infrastructure you control. It ships with <strong>no embedded credentials</strong>: you bring your own LLM key (or cloud identity), your own PostgreSQL, and your own API key for the first login. This guide covers the configuration contract, the one-command local setup, the Fly.io reference deployment, the documented alternatives, and what leaves the instance over the network.</p>
+<h2 id="configuration-contract">Configuration contract</h2>
+<p>Everything is configured by environment variables, so the same image runs unchanged on any host.</p>
+<h3 id="core">Core</h3>
+<table>
+<thead><tr><th>Variable</th><th>Required</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>FABRICATE__BootstrapApiKey</code></td><td>yes, first run</td><td>Seeds a bootstrap account and API key so you can authenticate. Generate with <code>openssl rand -base64 32</code>.</td></tr>
+<tr><td><code>FABRICATE_DB_PROVIDER</code></td><td>yes</td><td><code>postgres</code> for any hosted deployment; <code>sqlite</code> for local experiments; unset = in-memory (state lost on restart).</td></tr>
+<tr><td><code>FABRICATE_CONNECTION_STRING</code></td><td>with <code>postgres</code></td><td>PostgreSQL connection string. Carries credentials — set it as a <strong>secret</strong>.</td></tr>
+<tr><td><code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code></td><td>recommended</td><td>Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances; see <a href="#key-ring">Key ring</a>.</td></tr>
+<tr><td><code>ASPNETCORE_URLS</code></td><td>no</td><td>Defaults to <code>http://+:8080</code> in the image. TLS is terminated by your platform.</td></tr>
+</tbody>
+</table>
+<p>Pending EF Core migrations are applied automatically at startup, so a fresh database needs no manual step. Several instances starting at once apply the schema exactly once (EF Core's migration lock).</p>
+<h3 id="operator-platform-llm-credential-fabricate-llm">Operator (platform) LLM credential — <code>FABRICATE_LLM_*</code></h3>
+<p>Optional. Leave <code>FABRICATE_LLM_PROVIDER</code> unset and the platform credential is disabled; workspaces can still <a href="byok-llm-credentials.html">bring their own keys</a>. If it <strong>is</strong> set and invalid, the API refuses to start and names the offending variable.</p>
+<table>
+<thead><tr><th>Variable</th><th>Required</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>FABRICATE_LLM_PROVIDER</code></td><td>to enable</td><td><code>anthropic</code> \</td><td><code>openai-compatible</code> \</td><td><code>bedrock</code> \</td><td><code>vertex</code> \</td><td><code>foundry</code></td></tr>
+<tr><td><code>FABRICATE_LLM_MODEL</code></td><td>yes</td><td>Default model id, e.g. <code>claude-opus-5</code></td></tr>
+<tr><td><code>FABRICATE_LLM_ALLOWED_MODELS</code></td><td>yes</td><td>Comma-separated allowlist; <code>FABRICATE_LLM_MODEL</code> must be a member. Also constrains models that workspaces may register.</td></tr>
+<tr><td><code>FABRICATE_LLM_API_KEY_SECRET</code></td><td><code>anthropic</code>, <code>foundry</code></td><td>The <strong>name</strong> of the variable holding the key (e.g. <code>ANTHROPIC_API_KEY</code>) — never the key itself.</td></tr>
+<tr><td><code>FABRICATE_LLM_BASE_URL</code></td><td><code>openai-compatible</code>, <code>foundry</code></td><td>Endpoint base URL.</td></tr>
+<tr><td><code>FABRICATE_LLM_REGION</code></td><td><code>bedrock</code></td><td>AWS region; credentials come from the ambient IAM identity.</td></tr>
+<tr><td><code>FABRICATE_LLM_PROJECT_ID</code>, <code>FABRICATE_LLM_LOCATION</code></td><td><code>vertex</code></td><td>GCP project and location; credentials come from Application Default Credentials.</td></tr>
+<tr><td><code>FABRICATE_LLM_PLATFORM_FALLBACK</code></td><td>no</td><td><code>always</code> (single-operator self-hosting), <code>workspace-opt-in</code> (default; multi-tenant), <code>never</code>.</td></tr>
+<tr><td><code>FABRICATE_LLM_EFFORT</code></td><td>no</td><td><code>low</code> \</td><td><code>medium</code> \</td><td><code>high</code> \</td><td><code>max</code> where the provider supports it.</td></tr>
+<tr><td><code>FABRICATE_LLM_MAX_OUTPUT_TOKENS</code></td><td>no</td><td>Default 16000.</td></tr>
+<tr><td><code>FABRICATE_LLM_TIMEOUT_SECONDS</code></td><td>no</td><td>Default 120. Set your platform's proxy timeout above this.</td></tr>
+<tr><td><code>FABRICATE_LLM_MAX_TOOL_ITERATIONS</code></td><td>no</td><td>Default 8. Caps the model/tool loop per turn.</td></tr>
+<tr><td><code>FABRICATE_LLM_HISTORY_WINDOW</code></td><td>no</td><td>Default 40 messages sent as context.</td></tr>
+<tr><td><code>FABRICATE_LLM_ALLOWED_ENDPOINT_HOSTS</code></td><td>no</td><td>Hosts that workspace-supplied endpoints may target (suffix match). Empty = any public HTTPS host.</td></tr>
+<tr><td><code>FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS</code></td><td>no</td><td><code>true</code> permits <code>http://</code> and private/loopback endpoints — for air-gapped local runtimes only.</td></tr>
+</tbody>
+</table>
+<p>Provider notes:</p>
+<ul><li><strong>anthropic</strong> — the official Anthropic API. The adapter sends adaptive thinking and effort and never sends sampling</li></ul>
+<p>parameters or <code>budget_tokens</code>, which current Claude models reject.</p>
+<ul><li><strong>openai-compatible</strong> — one adapter for OpenAI, Azure OpenAI, vLLM, Ollama and gateways such as OpenRouter. A</li></ul>
+<p>keyless local runtime works with <code>FABRICATE_LLM_API_KEY_SECRET</code> unset.</p>
+<ul><li><strong>bedrock / vertex / foundry</strong> — Claude through your cloud account, authenticated by IAM / ADC / a Foundry key.</li></ul>
+<p>Bedrock model ids take the <code>anthropic.</code> prefix (e.g. <code>anthropic.claude-opus-5</code>); Vertex uses the bare id.</p>
+<h3 id="which-credential-a-chat-turn-uses">Which credential a chat turn uses</h3>
+<p>Project-bound credential → workspace default for the provider → the workspace's single active credential → the platform credential (only where <code>FABRICATE_LLM_PLATFORM_FALLBACK</code> allows) → none, in which case the chat returns a clear notice and the direct <code>/tool</code> commands still work.</p>
+<h2 id="one-command-locally">One command locally</h2>
+<pre><code class="language-bash">cp .env.example .env        # fill in FABRICATE__BootstrapApiKey and your LLM key
+docker compose up --build
+curl -s http://localhost:8080/healthz</code></pre>
+<p>Compose runs the API against PostgreSQL with a persisted volume for the Data Protection key ring, so the local shape is the hosted shape. Swagger UI is at <code>http://localhost:8080/swagger</code>.</p>
+<h2 id="fly-io-reference-deployment">Fly.io (reference deployment)</h2>
+<p>Why Fly: it runs the unchanged image, offers PostgreSQL on a private network next to the API, injects secrets as environment variables, health-checks <code>/healthz</code>, and scales to zero.</p>
+<ol><li>Fork the repository and install <code>flyctl</code>.</li><li><code>fly launch --no-deploy</code> (accepts the checked-in <code>fly.toml</code>; choose your app name and region).</li><li>Create and attach PostgreSQL — this sets <code>FABRICATE_CONNECTION_STRING</code> as a secret for you: ``<code>bash fly postgres create --name fabricate-db --region lhr fly postgres attach fabricate-db --app fabricate --variable-name FABRICATE_CONNECTION_STRING </code>`<code> (Or use Fly Managed Postgres, or set the secret by hand for Neon/Supabase — with </code>SSL Mode=Require`.)</li><li>Set the remaining secrets — these never enter GitHub: ``<code>bash fly secrets set FABRICATE__BootstrapApiKey="$(openssl rand -base64 32)" fly secrets set ANTHROPIC_API_KEY="sk-ant-…" </code>``</li><li>In GitHub: add <code>FLY_API_TOKEN</code> (<code>fly tokens create deploy -x 999999h</code>) as a secret, <code>SMOKE_API_KEY</code> (the bootstrap key) as a secret in an environment named <code>fly</code>, and optionally <code>FLY_APP</code> as a variable.</li><li>Push to <code>main</code>. The <a href="../../.github/workflows/deploy-fly.yml">deploy workflow</a> builds remotely, deploys, waits for <code>/healthz</code> through the cold start, and runs the smoke tests — and fails if they were skipped rather than executed.</li></ol>
+<p>Rotating any secret is <code>fly secrets set …</code>; it restarts the machine and needs no redeploy. Scaling out is <code>fly scale count 2</code> — the API is stateless.</p>
+<h3 id="cold-start">Cold start</h3>
+<p>With <code>min_machines_running = 0</code> the first request after idle starts a machine. Measure it after your first deploy:</p>
+<pre><code class="language-bash">fly machine stop; time curl -s -o /dev/null https://&lt;app&gt;.fly.dev/healthz</code></pre>
+<p>Record the number in your runbook and set <code>grace_period</code> in <code>fly.toml</code> a little above it. Expect single-digit seconds for the default image; if it is materially longer, trim the image (ReadyToRun/trimmed publish) rather than raising <code>min_machines_running</code>.</p>
+<h3 id="key-ring">Key ring</h3>
+<p>Per-workspace LLM credentials are encrypted with ASP.NET Core Data Protection. The key ring at <code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code> is what decrypts them: if it is lost, stored credentials are unrecoverable (users re-register them). On Fly's ephemeral disk the checked-in path is fine for a <strong>single-operator instance that uses the platform credential</strong>; before relying on per-workspace credentials in production, move the key ring to shared, persistent storage (a Fly volume on a single machine, or a blob store with an external KMS-wrapped key) — Data Protection supports both.</p>
+<h2 id="alternatives">Alternatives</h2>
+<ul><li><strong>Render</strong> — <code>render.yaml</code> at the repository root is a Blueprint: a Docker web service plus a managed PostgreSQL,</li></ul>
+<p>with secrets prompted in the dashboard.</p>
+<ul><li><strong>Railway</strong> — create a service from the repository (Dockerfile auto-detected) and add the PostgreSQL plugin; set the</li></ul>
+<p>same variables as <code>.env.example</code>, with <code>FABRICATE_CONNECTION_STRING</code> from the plugin's connection URL.</p>
+<ul><li><strong>Cloudflare Containers + Neon</strong> — viable now that the API is stateless; documented only, no maintained pipeline.</li></ul>
+<p>Cloudflare <strong>Workers</strong> cannot run .NET; Cloudflare <strong>Pages</strong> is a good host for this <code>docs/</code> site.</p>
+<ul><li><strong>AWS / Azure / GCP with Terraform</strong> — the production-grade path under <code>infra/</code>. Set <code>FABRICATE_DB_PROVIDER=postgres</code></li></ul>
+<p>and the connection string secret so the provisioned database is actually used.</p>
+<h2 id="egress-profile">Egress profile</h2>
+<p>A running instance makes outbound connections <strong>only</strong> to:</p>
+<table>
+<thead><tr><th>Destination</th><th>When</th></tr></thead>
+<tbody>
+<tr><td>Your PostgreSQL</td><td>always</td></tr>
+<tr><td>The configured LLM endpoint</td><td>during chat turns, credential validation, and nothing else</td></tr>
+<tr><td>Databases you point schema discovery at</td><td>when you run discovery</td></tr>
+</tbody>
+</table>
+<p>Selecting <code>openai-compatible</code> with a private base URL and <code>FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS=true</code> yields an instance that makes no calls outside your network. Schema metadata (table, column, type and relationship names) is sent to the model as tool output; row values are not.</p>
+<h2 id="cost-fly-reference-configuration">Cost (Fly reference configuration)</h2>
+<p>Assumptions: one <code>shared-cpu-1x</code> 512 MB machine that stops when idle, the smallest PostgreSQL plan, light usage. The database is the floor of the bill because it does not scale to zero; an external free-tier PostgreSQL (e.g. Neon) is the lowest-cost option. Check Fly's current pricing page for figures — they change more often than this document.</p>
+<h2 id="health-and-readiness">Health and readiness</h2>
+<p><code>GET /healthz</code> (unauthenticated) reports <code>status</code> and an <code>llm</code> block — whether the platform credential is configured, its provider and model, and the fallback mode. It never includes a secret or the resolved connection string. A missing LLM credential does not fail health: the rest of the API does not depend on a model.</p>
+<h2 id="backups">Backups</h2>
+<p>Use your PostgreSQL provider's automated backups and record the retention window. Rehearse a restore into a fresh database followed by an API boot against it; the migrator will find nothing pending and the bootstrap key will still authenticate.</p>
+</div>
+<footer><p>&copy; 2024 Fabricate contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></p></footer>
+</body>
+</html>

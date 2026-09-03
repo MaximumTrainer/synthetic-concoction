@@ -649,37 +649,72 @@ Account-level governance controls:
 
 ## Agent Chat
 
-The chat system lets you interact with Fabricate in natural language via a persistent session.
+The chat system lets you interact with Fabricate in natural language via a persistent session. Each turn is answered
+by the LLM the workspace is configured to use — either a credential the workspace registered itself
+([bring your own key](how-to/byok-llm-credentials.md)) or, where allowed, the operator's platform credential
+([self-hosting](how-to/self-hosting.md)). Fabricate ships with no model credential of its own.
 
 ### Sessions
 
-A chat session is created with `POST /chat/sessions` and has:
+A chat session is created with `POST /workspaces/{workspaceId}/chat/sessions` and has:
 
 - `workspaceId` — the workspace it operates in
-- `title` — display name
-- `mode` — session mode (e.g. `"standard"`)
+- `projectId` — optional; a project-bound LLM credential takes precedence when set
+- `name` — display name
+- `mode` — `Guided` (default), `Autonomous`, or `ReviewRequired`
 
-Messages are posted to `POST /chat/sessions/{id}/messages`. Each message has a `role` of `"user"`, `"assistant"`, or `"tool"`.
+Messages are posted to `POST /workspaces/{workspaceId}/chat/sessions/{id}/messages` (or `…/messages/stream` for
+server-sent events). The response is the whole **turn**: your message, the assistant reply, every tool invocation
+the model made, token usage, and a stop reason. Messages have a `role` of `User`, `Assistant`, `Tool` (a tool's
+output) or `System` (a notice from Fabricate itself, such as a declined request or a missing credential).
+
+### How a turn runs
+
+1. Your message is persisted.
+2. The system instructions are composed: Fabricate's base guidance, the mode guidance, then the workspace → project →
+   session instruction layers.
+3. The model is called with the recent history and the tools the workspace is allowed to use.
+4. Tool calls the model makes are executed under **your** workspace permissions and their results fed back; this
+   repeats until the model answers or `FABRICATE_LLM_MAX_TOOL_ITERATIONS` is reached.
+5. The reply is persisted and returned.
+
+A provider refusal or failure is recorded as a `System` notice, never an error response.
+
+### Modes
+
+| Mode | Tool calls |
+| --- | --- |
+| `Guided` | Run, and the model is instructed to explain before acting. |
+| `Autonomous` | Run without confirmation. |
+| `ReviewRequired` | Parked as `Pending`; an Editor or Admin approves each one via `POST …/tool-invocations/{id}/approve`. Use this wherever `generate_data` has real side effects. |
 
 ### Built-in Tools
 
-The agent has two built-in tools:
+The agent has two built-in tools. Each workspace can be restricted to a subset (the allowlist is enforced server-side;
+a call to a tool outside it fails without executing).
 
-#### `discover-schema`
+#### `discover_schema`
 
 Calls `ISchemaDiscoveryService` for the workspace's configured database and returns a JSON summary of discovered tables and columns.
 
 Example prompt: *"Show me the schema for this database."*
 
-#### `generate-data`
+#### `generate_data`
 
 Runs the full generation pipeline (discover → plan → generate → validate) and returns a JSON result with row and table counts.
 
 Example prompt: *"Generate 50 rows for each table."*
 
+`/tool <name> <json>` invokes a tool directly, bypassing the model — useful for scripting and when no credential is configured.
+
 ### Instruction Context
 
-Each workspace can store **agent instructions** — a system prompt that is prepended to every session in that workspace. This lets you customise the agent's behaviour per workspace (e.g. "Always use the Healthcare compliance profile for this workspace.").
+Each workspace can store **agent instructions** — a system prompt that is prepended to every session in that workspace. This lets you customise the agent's behaviour per workspace (e.g. "Always use the Healthcare compliance profile for this workspace."). Project instructions and a per-session override layer on top, in that order.
+
+### What is sent to the model
+
+Schema metadata (table, column and type names, relationships) and tool outputs. Row values from your databases are
+not read by the tools and are not sent.
 
 ---
 

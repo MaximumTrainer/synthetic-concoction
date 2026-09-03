@@ -112,16 +112,33 @@ The API starts on `http://localhost:5000` by default. Swagger UI is available at
 
 All endpoints require the header `X-Api-Key: cnc_<secret>`. See [docs/how-to/rest-api.md](docs/how-to/rest-api.md) for authentication setup.
 
+### Self-hosting and bringing your own LLM key
+
+Fabricate ships with **no embedded credentials**. You supply your own LLM key (Anthropic, any OpenAI-compatible
+endpoint, or Claude via Bedrock / Vertex AI / Foundry using cloud identity), your own PostgreSQL, and your own
+bootstrap API key. The quickest working instance is one command:
+
+```bash
+cp .env.example .env        # fill in FABRICATE__BootstrapApiKey and your LLM key
+docker compose up --build   # API + PostgreSQL; schema is migrated on first boot
+```
+
+- [Self-hosting guide](docs/how-to/self-hosting.md) — configuration contract, Fly.io reference deployment
+  (`fly.toml` + deploy-from-GitHub workflow), Render/Railway alternatives, egress profile, cost.
+- [Bring your own LLM key](docs/how-to/byok-llm-credentials.md) — per-workspace credentials, encrypted at rest,
+  with rotation, revocation, validation and an egress allowlist for tenant-supplied endpoints.
+- [CI integration secrets](docs/how-to/ci-integration-secrets.md) — opt-in tests against real databases and clouds.
+
 ## Solution Structure
 
 | Project | Purpose |
 |---|---|
-| `Fabricate.Domain` | Entities, value objects, enums, domain models |
-| `Fabricate.Application` | Use cases, port interfaces, orchestration |
-| `Fabricate.Infrastructure` | Adapters: SQLite/PostgreSQL providers, CSV/JSON/SQL exporters, in-memory repos |
+| `Fabricate.Domain` | Entities, value objects, enums, domain models (including provider-neutral LLM and credential models) |
+| `Fabricate.Application` | Use cases, port interfaces, orchestration; the agent chat loop and BYOK credential lifecycle |
+| `Fabricate.Infrastructure` | Adapters: SQLite/PostgreSQL providers, EF Core persistence (SQLite + PostgreSQL), CSV/JSON/SQL/Parquet exporters, LLM adapters (Anthropic SDK incl. Bedrock/Vertex/Foundry, OpenAI-compatible), Data Protection secret cipher |
 | `Fabricate.Cli` | `System.CommandLine` CLI (5 commands) |
-| `Fabricate.Api` | ASP.NET Core Minimal API (REST, Swagger) |
-| `Fabricate.Tests` | 81 xUnit + FluentAssertions tests |
+| `Fabricate.Api` | ASP.NET Core Minimal API (REST, SSE chat streaming, Swagger) |
+| `Fabricate.Tests` | 253 xUnit + FluentAssertions tests (unit, SQLite and PostgreSQL/Testcontainers integration) |
 | `sdk/typescript/` | `@fabricate/client` npm package (CJS + ESM + DTS) |
 
 ## Extending Fabricate

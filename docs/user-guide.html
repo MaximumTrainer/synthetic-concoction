@@ -380,14 +380,31 @@ tables:
 </table>
 
 <h2 id="chat">11. Agent Chat</h2>
-<p>Chat sessions let you interact with Fabricate via natural language. Sessions are created per workspace.</p>
+<p>Chat sessions let you interact with Fabricate via natural language. Sessions are created per workspace. Each turn is answered by the model the workspace is configured to use — a credential the workspace registered itself (<a href="how-to/byok-llm-credentials.html">bring your own key</a>) or, where allowed, the operator's platform credential (<a href="how-to/self-hosting.html">self-hosting</a>). Fabricate ships with no model credential of its own.</p>
+<h3>How a turn runs</h3>
+<ol>
+  <li>Your message is persisted.</li>
+  <li>System instructions are composed: Fabricate's base guidance, the mode guidance, then the workspace → project → session instruction layers.</li>
+  <li>The model is called with recent history and the tools the workspace is allowed to use.</li>
+  <li>Tool calls run under <em>your</em> workspace permissions and their results are fed back, until the model answers or <code>FABRICATE_LLM_MAX_TOOL_ITERATIONS</code> is reached.</li>
+  <li>The reply is persisted and the whole turn (message, reply, tool invocations, token usage, stop reason) is returned — or streamed as server-sent events.</li>
+</ol>
+<p>A provider refusal or failure becomes a <code>System</code>-role notice, never an error response.</p>
+<h3>Modes</h3>
+<table>
+  <tr><th>Mode</th><th>Tool calls</th></tr>
+  <tr><td><code>Guided</code></td><td>Run; the model is instructed to explain before acting.</td></tr>
+  <tr><td><code>Autonomous</code></td><td>Run without confirmation.</td></tr>
+  <tr><td><code>ReviewRequired</code></td><td>Parked as <code>Pending</code>; an Editor or Admin approves each one. Use wherever <code>generate_data</code> has real side effects.</td></tr>
+</table>
 <h3>Built-in Tools</h3>
 <table>
   <tr><th>Tool</th><th>Description</th></tr>
-  <tr><td><code>discover-schema</code></td><td>Calls ISchemaDiscoveryService, returns JSON summary of discovered tables and columns.</td></tr>
-  <tr><td><code>generate-data</code></td><td>Runs the full generation pipeline, returns JSON result with row and table counts.</td></tr>
+  <tr><td><code>discover_schema</code></td><td>Calls ISchemaDiscoveryService, returns JSON summary of discovered tables and columns.</td></tr>
+  <tr><td><code>generate_data</code></td><td>Runs the full generation pipeline, returns JSON result with row and table counts.</td></tr>
 </table>
-<p>Workspace-level <strong>agent instructions</strong> are prepended to every session in that workspace as a system prompt.</p>
+<p>Each workspace can be restricted to a subset of tools; the allowlist is enforced server-side. <code>/tool &lt;name&gt; &lt;json&gt;</code> invokes a tool directly, bypassing the model.</p>
+<p>Workspace-level <strong>agent instructions</strong> are prepended to every session in that workspace as a system prompt; project instructions and a per-session override layer on top. Schema metadata and tool outputs are sent to the model; row values from your databases are not.</p>
 
 <h2 id="workflows">12. Workflows &amp; Skills</h2>
 <p>Workflows define multi-step automation sequences triggered on demand via <code>POST /workflows/{id}/run</code>.</p>
