@@ -1,7 +1,6 @@
 using Fabricate.Application.Abstractions;
 using Fabricate.Domain.Models;
-using Microsoft.OpenApi.Models;
-using Microsoft.OpenApi.Readers;
+using Microsoft.OpenApi;
 
 namespace Fabricate.Application.Workflows;
 
@@ -9,32 +8,43 @@ public sealed class OpenApiContractIngestionService : IApiContractIngestionServi
 {
     public async Task<IReadOnlyList<GeneratedApiEndpoint>> IngestAsync(string openApiJson, Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        var reader = new OpenApiStringReader();
-        var document = reader.Read(openApiJson, out var diagnostics);
+        var result = OpenApiDocument.Parse(openApiJson, "json", settings: null);
 
-        if (diagnostics.Errors.Count > 0)
+        var errors = result.Diagnostic?.Errors;
+        if (errors is { Count: > 0 })
         {
-            var errors = string.Join("; ", diagnostics.Errors.Select(e => e.Message));
-            throw new InvalidOperationException($"OpenAPI parse errors: {errors}");
+            throw new InvalidOperationException(
+                $"OpenAPI parse errors: {string.Join("; ", errors.Select(e => e.Message))}");
         }
 
         var endpoints = new List<GeneratedApiEndpoint>();
+        var paths = result.Document?.Paths;
 
-        foreach (var (path, pathItem) in document.Paths)
+        if (paths is not null)
         {
-            foreach (var (method, operation) in pathItem.Operations)
+            foreach (var (path, pathItem) in paths)
             {
-                var endpoint = new GeneratedApiEndpoint(
-                    Guid.NewGuid(),
-                    workspaceId,
-                    path,
-                    method.ToString().ToUpperInvariant(),
-                    operation.OperationId ?? $"{method}_{path.TrimStart('/').Replace('/', '_')}",
-                    null,
-                    true,
-                    DateTimeOffset.UtcNow);
+                if (pathItem.Operations is null)
+                {
+                    continue;
+                }
 
-                endpoints.Add(endpoint);
+                foreach (var (method, operation) in pathItem.Operations)
+                {
+                    var verb = method.Method.ToUpperInvariant();
+
+                    var endpoint = new GeneratedApiEndpoint(
+                        Guid.NewGuid(),
+                        workspaceId,
+                        path,
+                        verb,
+                        operation.OperationId ?? $"{verb}_{path.TrimStart('/').Replace('/', '_')}",
+                        null,
+                        true,
+                        DateTimeOffset.UtcNow);
+
+                    endpoints.Add(endpoint);
+                }
             }
         }
 
