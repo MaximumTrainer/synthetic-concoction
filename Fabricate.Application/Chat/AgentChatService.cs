@@ -1,4 +1,7 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Fabricate.Application.Abstractions;
+using Fabricate.Application.Llm;
 using Fabricate.Domain.Models;
 
 namespace Fabricate.Application.Chat;
@@ -7,8 +10,13 @@ public sealed class AgentChatService(
     ISessionRepository sessionRepository,
     IToolRegistry toolRegistry,
     IWorkspaceService workspaceService,
-    IInstructionVersionService instructionVersionService) : IAgentChatService
+    IInstructionVersionService instructionVersionService,
+    ILlmCredentialResolver credentialResolver,
+    IChatCompletionClientFactory clientFactory,
+    LlmOptions options) : IAgentChatService
 {
+    private const string ToolCommandPrefix = "/tool ";
+
     public async Task<ChatSession> CreateSessionAsync(CreateChatSessionCommand command, CancellationToken cancellationToken = default)
     {
         var role = await workspaceService.GetEffectiveRoleAsync(command.WorkspaceId, command.UserId, cancellationToken).ConfigureAwait(false);
@@ -44,60 +52,57 @@ public sealed class AgentChatService(
         return await sessionRepository.SaveAsync(updated, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<ChatMessage> SendMessageAsync(SendMessageCommand command, CancellationToken cancellationToken = default)
+    public async Task<ChatTurnResult> SendMessageAsync(SendMessageCommand command, CancellationToken cancellationToken = default)
     {
-        var session = await GetSessionOrThrowAsync(command.SessionId, command.UserId, cancellationToken).ConfigureAwait(false);
-        if (session.IsArchived)
+        ChatTurnResult? result = null;
+        await foreach (var evt in RunTurnAsync(command, cancellationToken).ConfigureAwait(false))
         {
-            throw new InvalidOperationException("Cannot send messages to an archived session.");
+            if (evt is ChatStreamEvent.Completed completed)
+                result = completed.Result;
         }
 
-        var message = new ChatMessage(Guid.NewGuid(), command.SessionId, MessageRole.User, command.Content, DateTimeOffset.UtcNow);
-        await sessionRepository.SaveMessageAsync(message, cancellationToken).ConfigureAwait(false);
+        return result ?? throw new InvalidOperationException("Chat turn did not complete.");
+    }
 
-        // Check if the content looks like a tool invocation request.
-        if (command.Content.StartsWith("/tool ", StringComparison.OrdinalIgnoreCase))
+    public IAsyncEnumerable<ChatStreamEvent> StreamMessageAsync(SendMessageCommand command, CancellationToken cancellationToken = default)
+        => RunTurnAsync(command, cancellationToken);
+
+    public async Task<ToolInvocation> ApproveToolInvocationAsync(Guid sessionId, Guid invocationId, Guid requestingUserId, CancellationToken cancellationToken = default)
+    {
+        var session = await GetSessionOrThrowAsync(sessionId, requestingUserId, cancellationToken).ConfigureAwait(false);
+
+        var role = await workspaceService.GetEffectiveRoleAsync(session.WorkspaceId, requestingUserId, cancellationToken).ConfigureAwait(false);
+        if (role < WorkspaceRole.Editor)
         {
-            var parts = command.Content[6..].Split(' ', 2);
-            var toolName = parts[0];
-            var inputJson = parts.Length > 1 ? parts[1] : "{}";
-
-            var tool = toolRegistry.Resolve(toolName);
-            if (tool is not null)
-            {
-                var invocation = new ToolInvocation(Guid.NewGuid(), command.SessionId, message.Id, toolName, inputJson, null, ToolInvocationStatus.Running, DateTimeOffset.UtcNow);
-                await sessionRepository.SaveInvocationAsync(invocation, cancellationToken).ConfigureAwait(false);
-
-                string outputJson;
-                ToolInvocationStatus status;
-                string? error = null;
-                try
-                {
-                    outputJson = await tool.ExecuteAsync(inputJson, command.SessionId, command.UserId, cancellationToken).ConfigureAwait(false);
-                    status = ToolInvocationStatus.Succeeded;
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    outputJson = "{}";
-                    status = ToolInvocationStatus.Failed;
-                    error = ex.Message;
-                }
-
-                var completed = invocation with { OutputJson = outputJson, Status = status, CompletedAt = DateTimeOffset.UtcNow, ErrorMessage = error };
-                await sessionRepository.SaveInvocationAsync(completed, cancellationToken).ConfigureAwait(false);
-
-                var assistantMessage = new ChatMessage(Guid.NewGuid(), command.SessionId, MessageRole.Tool, outputJson, DateTimeOffset.UtcNow);
-                await sessionRepository.SaveMessageAsync(assistantMessage, cancellationToken).ConfigureAwait(false);
-            }
+            throw new UnauthorizedAccessException("Only workspace editors or admins can approve tool calls.");
         }
 
-        return message;
+        var invocation = await sessionRepository.GetInvocationAsync(invocationId, cancellationToken).ConfigureAwait(false);
+        if (invocation is null || invocation.SessionId != sessionId)
+        {
+            throw new KeyNotFoundException($"Tool invocation '{invocationId}' not found.");
+        }
+
+        if (invocation.Status != ToolInvocationStatus.Pending)
+        {
+            throw new InvalidOperationException($"Tool invocation '{invocationId}' is {invocation.Status}, not Pending.");
+        }
+
+        var executed = await ExecuteInvocationAsync(session, invocation, requestingUserId, cancellationToken).ConfigureAwait(false);
+        await PersistToolMessageAsync(session.Id, executed, cancellationToken).ConfigureAwait(false);
+        return executed;
     }
 
     public async Task<IReadOnlyList<ChatMessage>> GetHistoryAsync(Guid sessionId, Guid requestingUserId, int pageSize = 50, CancellationToken cancellationToken = default)
     {
         await GetSessionOrThrowAsync(sessionId, requestingUserId, cancellationToken).ConfigureAwait(false);
         return await sessionRepository.GetMessagesAsync(sessionId, 0, pageSize, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<ToolInvocation>> GetToolInvocationsAsync(Guid sessionId, Guid requestingUserId, CancellationToken cancellationToken = default)
+    {
+        await GetSessionOrThrowAsync(sessionId, requestingUserId, cancellationToken).ConfigureAwait(false);
+        return await sessionRepository.ListInvocationsAsync(sessionId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ChatSession> SetInstructionOverrideAsync(Guid sessionId, string? instructionOverride, Guid requestingUserId, CancellationToken cancellationToken = default)
@@ -134,6 +139,305 @@ public sealed class AgentChatService(
 
         return string.Join("\n\n", parts);
     }
+
+    // ── Turn orchestration ────────────────────────────────────────────────────────
+
+    private async IAsyncEnumerable<ChatStreamEvent> RunTurnAsync(SendMessageCommand command, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var session = await GetSessionOrThrowAsync(command.SessionId, command.UserId, cancellationToken).ConfigureAwait(false);
+        if (session.IsArchived)
+        {
+            throw new InvalidOperationException("Cannot send messages to an archived session.");
+        }
+
+        var userMessage = new ChatMessage(Guid.NewGuid(), command.SessionId, MessageRole.User, command.Content, DateTimeOffset.UtcNow);
+        await sessionRepository.SaveMessageAsync(userMessage, cancellationToken).ConfigureAwait(false);
+
+        // Explicit operator affordance: bypass the model and invoke a tool directly.
+        if (command.Content.StartsWith(ToolCommandPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var result = await RunDirectToolCommandAsync(session, userMessage, command, cancellationToken).ConfigureAwait(false);
+            yield return new ChatStreamEvent.Completed(result);
+            yield break;
+        }
+
+        var credential = await credentialResolver.ResolveAsync(session.WorkspaceId, session.ProjectId, null, cancellationToken).ConfigureAwait(false);
+        if (credential is null)
+        {
+            var notice = await PersistNoticeAsync(session.Id,
+                "No LLM credential is configured for this workspace. Register one under /workspaces/{workspaceId}/llm-credentials, " +
+                "or ask the operator to enable platform fallback. Direct tool commands (/tool <name> <json>) still work.",
+                cancellationToken).ConfigureAwait(false);
+            yield return new ChatStreamEvent.Notice(notice.Content);
+            yield return new ChatStreamEvent.Completed(new ChatTurnResult(userMessage, notice, [], TokenUsage.Zero, null));
+            yield break;
+        }
+
+        var client = clientFactory.Create(credential);
+        var allowedTools = toolRegistry.AllowedTools(session.WorkspaceId);
+        var toolDefinitions = client.Capabilities.SupportsToolCalling
+            ? allowedTools.Select(toolRegistry.Resolve).Where(t => t is not null)
+                .Select(t => new LlmToolDefinition(t!.Name, t.Description, t.InputSchemaJson)).ToArray()
+            : [];
+
+        var systemInstructions = await BuildSystemInstructionsAsync(session, cancellationToken).ConfigureAwait(false);
+        var history = await sessionRepository.GetMessagesAsync(session.Id, 0, options.HistoryWindow, cancellationToken).ConfigureAwait(false);
+        var conversation = history.Select(ToLlmMessage).Where(m => m is not null).Cast<LlmMessage>().ToList();
+
+        var invocations = new List<ToolInvocation>();
+        var usage = TokenUsage.Zero;
+        ChatMessage? lastAssistant = null;
+        LlmStopReason? stopReason = null;
+
+        for (var iteration = 0; iteration < options.MaxToolIterations; iteration++)
+        {
+            var request = new ChatCompletionRequest(
+                credential.Model,
+                systemInstructions,
+                conversation,
+                toolDefinitions,
+                Math.Min(options.MaxOutputTokens, client.Capabilities.MaxOutputTokens),
+                Temperature: null,
+                Effort: client.Capabilities.SupportsEffort ? options.Effort : null);
+
+            ChatCompletionResult? completion = null;
+            LlmProviderException? failure = null;
+
+            // Provider failures are captured, never propagated: a yield cannot sit inside a catch block,
+            // so the stream is pulled manually and exceptions land in `failure`.
+            if (client.Capabilities.SupportsStreaming)
+            {
+                await using var stream = client.StreamAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
+                while (true)
+                {
+                    bool moved;
+                    try
+                    {
+                        moved = await stream.MoveNextAsync().ConfigureAwait(false);
+                    }
+                    catch (LlmProviderException ex)
+                    {
+                        failure = ex;
+                        break;
+                    }
+
+                    if (!moved) break;
+
+                    var chunk = stream.Current;
+                    if (!string.IsNullOrEmpty(chunk.TextDelta))
+                        yield return new ChatStreamEvent.TextDelta(chunk.TextDelta);
+                    if (chunk.Final is not null)
+                        completion = chunk.Final;
+                }
+            }
+            else
+            {
+                try
+                {
+                    completion = await client.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+                }
+                catch (LlmProviderException ex)
+                {
+                    failure = ex;
+                }
+
+                if (completion is not null && !string.IsNullOrEmpty(completion.Text))
+                    yield return new ChatStreamEvent.TextDelta(completion.Text);
+            }
+
+            if (failure is null && completion is null)
+            {
+                failure = new LlmProviderException(LlmFailureKind.ProviderError, "The provider returned no completion.");
+            }
+
+            if (failure is not null)
+            {
+                var notice = await PersistNoticeAsync(session.Id, $"LLM provider error: {failure.Message}", cancellationToken).ConfigureAwait(false);
+                yield return new ChatStreamEvent.Notice(notice.Content);
+                yield return new ChatStreamEvent.Completed(new ChatTurnResult(userMessage, lastAssistant ?? notice, invocations, usage, LlmStopReason.Error));
+                yield break;
+            }
+
+            usage = usage.Add(completion!.Usage);
+            stopReason = completion.StopReason;
+
+            if (!string.IsNullOrWhiteSpace(completion.Text))
+            {
+                lastAssistant = new ChatMessage(Guid.NewGuid(), session.Id, MessageRole.Assistant, completion.Text, DateTimeOffset.UtcNow);
+                await sessionRepository.SaveMessageAsync(lastAssistant, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (completion.StopReason is LlmStopReason.Refusal or LlmStopReason.ContentFiltered)
+            {
+                var reason = string.IsNullOrWhiteSpace(completion.StopDetail) ? completion.StopReason.ToString() : completion.StopDetail;
+                var notice = await PersistNoticeAsync(session.Id, $"The model declined this request ({reason}).", cancellationToken).ConfigureAwait(false);
+                yield return new ChatStreamEvent.Notice(notice.Content);
+                lastAssistant ??= notice;
+                break;
+            }
+
+            if (completion.ToolCalls.Count == 0)
+            {
+                break;
+            }
+
+            conversation.Add(LlmMessage.Assistant(completion.Text, completion.ToolCalls));
+
+            var awaitingApproval = false;
+            foreach (var call in completion.ToolCalls)
+            {
+                var invocation = new ToolInvocation(
+                    Guid.NewGuid(), session.Id, lastAssistant?.Id, call.Name, call.ArgumentsJson, null,
+                    ToolInvocationStatus.Pending, DateTimeOffset.UtcNow);
+
+                if (session.Mode == ChatMode.ReviewRequired)
+                {
+                    // Park the call; the model loop resumes only after an explicit approval.
+                    invocation = invocation with { ErrorMessage = null };
+                    await sessionRepository.SaveInvocationAsync(invocation, cancellationToken).ConfigureAwait(false);
+                    invocations.Add(invocation);
+                    yield return new ChatStreamEvent.ToolCallRequested(invocation);
+                    awaitingApproval = true;
+                    continue;
+                }
+
+                var executed = await ExecuteInvocationAsync(session, invocation, command.UserId, cancellationToken).ConfigureAwait(false);
+                invocations.Add(executed);
+                await PersistToolMessageAsync(session.Id, executed, cancellationToken).ConfigureAwait(false);
+                yield return new ChatStreamEvent.ToolCompleted(executed);
+
+                conversation.Add(LlmMessage.FromToolResult(new LlmToolResult(
+                    call.Id,
+                    executed.OutputJson ?? "{}",
+                    executed.Status == ToolInvocationStatus.Failed)));
+            }
+
+            if (awaitingApproval)
+            {
+                var pending = invocations.Count(i => i.Status == ToolInvocationStatus.Pending);
+                var notice = await PersistNoticeAsync(session.Id,
+                    $"{pending} tool call(s) are awaiting approval because this session is in ReviewRequired mode.",
+                    cancellationToken).ConfigureAwait(false);
+                yield return new ChatStreamEvent.Notice(notice.Content);
+                lastAssistant ??= notice;
+                break;
+            }
+
+            if (iteration == options.MaxToolIterations - 1)
+            {
+                var notice = await PersistNoticeAsync(session.Id,
+                    $"Stopped after {options.MaxToolIterations} tool iterations without a final answer.",
+                    cancellationToken).ConfigureAwait(false);
+                yield return new ChatStreamEvent.Notice(notice.Content);
+                lastAssistant ??= notice;
+            }
+        }
+
+        yield return new ChatStreamEvent.Completed(new ChatTurnResult(userMessage, lastAssistant, invocations, usage, stopReason));
+    }
+
+    private async Task<ChatTurnResult> RunDirectToolCommandAsync(ChatSession session, ChatMessage userMessage, SendMessageCommand command, CancellationToken cancellationToken)
+    {
+        var parts = command.Content[ToolCommandPrefix.Length..].Split(' ', 2);
+        var toolName = parts[0];
+        var inputJson = parts.Length > 1 ? parts[1] : "{}";
+
+        var invocation = new ToolInvocation(Guid.NewGuid(), session.Id, userMessage.Id, toolName, inputJson, null, ToolInvocationStatus.Pending, DateTimeOffset.UtcNow);
+        var executed = await ExecuteInvocationAsync(session, invocation, command.UserId, cancellationToken).ConfigureAwait(false);
+        var toolMessage = await PersistToolMessageAsync(session.Id, executed, cancellationToken).ConfigureAwait(false);
+
+        return new ChatTurnResult(userMessage, toolMessage, [executed], TokenUsage.Zero, null);
+    }
+
+    /// <summary>Runs one tool call under the requesting user's workspace authority, recording every state transition.</summary>
+    private async Task<ToolInvocation> ExecuteInvocationAsync(ChatSession session, ToolInvocation invocation, Guid userId, CancellationToken cancellationToken)
+    {
+        var running = invocation with { Status = ToolInvocationStatus.Running, StartedAt = DateTimeOffset.UtcNow };
+        await sessionRepository.SaveInvocationAsync(running, cancellationToken).ConfigureAwait(false);
+
+        var allowed = toolRegistry.AllowedTools(session.WorkspaceId);
+        var tool = allowed.Contains(invocation.ToolName, StringComparer.OrdinalIgnoreCase) ? toolRegistry.Resolve(invocation.ToolName) : null;
+
+        string outputJson;
+        ToolInvocationStatus status;
+        string? error = null;
+
+        if (tool is null)
+        {
+            outputJson = ErrorJson($"Tool '{invocation.ToolName}' is not available in this workspace.");
+            status = ToolInvocationStatus.Failed;
+            error = $"Tool '{invocation.ToolName}' is not available in this workspace.";
+        }
+        else
+        {
+            try
+            {
+                outputJson = await tool.ExecuteAsync(invocation.InputJson ?? "{}", session.Id, userId, cancellationToken).ConfigureAwait(false);
+                status = ToolInvocationStatus.Succeeded;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or InvalidOperationException or ArgumentException or JsonException)
+            {
+                outputJson = ErrorJson(ex.Message);
+                status = ToolInvocationStatus.Failed;
+                error = ex.Message;
+            }
+        }
+
+        var completed = running with { OutputJson = outputJson, Status = status, CompletedAt = DateTimeOffset.UtcNow, ErrorMessage = error };
+        return await sessionRepository.SaveInvocationAsync(completed, cancellationToken).ConfigureAwait(false);
+    }
+
+    private Task<ChatMessage> PersistToolMessageAsync(Guid sessionId, ToolInvocation invocation, CancellationToken cancellationToken)
+        => sessionRepository.SaveMessageAsync(
+            new ChatMessage(Guid.NewGuid(), sessionId, MessageRole.Tool, invocation.OutputJson ?? "{}", DateTimeOffset.UtcNow),
+            cancellationToken);
+
+    private Task<ChatMessage> PersistNoticeAsync(Guid sessionId, string content, CancellationToken cancellationToken)
+        => sessionRepository.SaveMessageAsync(
+            new ChatMessage(Guid.NewGuid(), sessionId, MessageRole.System, content, DateTimeOffset.UtcNow),
+            cancellationToken);
+
+    private async Task<string> BuildSystemInstructionsAsync(ChatSession session, CancellationToken cancellationToken)
+    {
+        var composed = await GetComposedInstructionsAsync(session.Id, cancellationToken).ConfigureAwait(false);
+
+        var modeGuidance = session.Mode switch
+        {
+            ChatMode.Guided => "Before invoking a tool that changes data, explain what you are about to do and why.",
+            ChatMode.Autonomous => "You may invoke tools without asking for confirmation.",
+            ChatMode.ReviewRequired => "Every tool call you request will be held for human approval before it runs.",
+            _ => string.Empty,
+        };
+
+        var parts = new List<string>
+        {
+            "You are Fabricate's data agent. You help engineers discover database schemas and generate synthetic, referentially consistent test data. " +
+            "Never ask for or repeat real production data; work only with schema metadata and synthetic values.",
+        };
+        if (!string.IsNullOrWhiteSpace(modeGuidance)) parts.Add(modeGuidance);
+        if (!string.IsNullOrWhiteSpace(composed)) parts.Add(composed);
+
+        return string.Join("\n\n", parts);
+    }
+
+    /// <summary>
+    /// Maps persisted history to provider-neutral turns. Tool outputs are replayed as user-visible text because
+    /// stored messages do not retain provider tool-call ids; system notices are not replayed at all.
+    /// </summary>
+    private static LlmMessage? ToLlmMessage(ChatMessage message) => message.Role switch
+    {
+        MessageRole.User => LlmMessage.User(message.Content),
+        MessageRole.Assistant => LlmMessage.Assistant(message.Content),
+        MessageRole.Tool => LlmMessage.User($"[Tool output]\n{message.Content}"),
+        _ => null,
+    };
+
+    private static string ErrorJson(string message)
+        => JsonSerializer.Serialize(new { error = message });
 
     private async Task<ChatSession> GetSessionOrThrowAsync(Guid sessionId, Guid requestingUserId, CancellationToken cancellationToken)
     {

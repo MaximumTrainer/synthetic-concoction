@@ -1,6 +1,7 @@
 using Fabricate.Application.Abstractions;
 using Fabricate.Application.Chat;
 using Fabricate.Application.Governance;
+using Fabricate.Application.Llm;
 using Fabricate.Application.Workspaces;
 using Fabricate.Domain.Models;
 using Fabricate.Infrastructure.Repositories;
@@ -23,7 +24,9 @@ public sealed class AgentChatServiceTests
         _auditLogService = new AuditLogService(_auditLogRepo);
         _workspaceService = new WorkspaceService(_auditLogService);
         _instructionService = new InstructionVersionService(_workspaceService);
-        _chatService = new AgentChatService(_sessionRepo, new NoOpToolRegistry(), _workspaceService, _instructionService);
+        _chatService = new AgentChatService(
+            _sessionRepo, new NoOpToolRegistry(), _workspaceService, _instructionService,
+            new NoCredentialResolver(), new ThrowingClientFactory(), new LlmOptions());
     }
 
     private async Task<(Guid workspaceId, Guid adminUserId)> CreateWorkspaceAsync()
@@ -107,46 +110,23 @@ public sealed class AgentChatServiceTests
 
     // ── Test doubles ─────────────────────────────────────────────────────────────
 
-    private sealed class InMemorySessionRepository : ISessionRepository
-    {
-        private readonly Dictionary<Guid, ChatSession> _sessions = [];
-        private readonly Dictionary<Guid, List<ChatMessage>> _messages = [];
-        private readonly Dictionary<Guid, ToolInvocation> _invocations = [];
-
-        public Task<ChatSession> SaveAsync(ChatSession session, CancellationToken ct = default)
-        {
-            _sessions[session.Id] = session;
-            return Task.FromResult(session);
-        }
-
-        public Task<ChatSession?> GetByIdAsync(Guid id, CancellationToken ct = default)
-            => Task.FromResult(_sessions.GetValueOrDefault(id));
-
-        public Task<ChatMessage> SaveMessageAsync(ChatMessage message, CancellationToken ct = default)
-        {
-            if (!_messages.TryGetValue(message.SessionId, out var list))
-                _messages[message.SessionId] = list = [];
-            list.Add(message);
-            return Task.FromResult(message);
-        }
-
-        public Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid sessionId, int skip, int take, CancellationToken ct = default)
-        {
-            var msgs = _messages.TryGetValue(sessionId, out var list) ? list : [];
-            return Task.FromResult<IReadOnlyList<ChatMessage>>(msgs.Skip(skip).Take(take).ToArray());
-        }
-
-        public Task<ToolInvocation> SaveInvocationAsync(ToolInvocation invocation, CancellationToken ct = default)
-        {
-            _invocations[invocation.Id] = invocation;
-            return Task.FromResult(invocation);
-        }
-    }
-
     private sealed class NoOpToolRegistry : IToolRegistry
     {
         public void Register(ITool tool) { }
         public ITool? Resolve(string toolName) => null;
         public IReadOnlyList<string> AllowedTools(Guid workspaceId) => [];
+        public void SetAllowedTools(Guid workspaceId, IReadOnlyList<string> toolNames) { }
+    }
+
+    private sealed class NoCredentialResolver : ILlmCredentialResolver
+    {
+        public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
+            => Task.FromResult<ResolvedLlmCredential?>(null);
+    }
+
+    private sealed class ThrowingClientFactory : IChatCompletionClientFactory
+    {
+        public IChatCompletionClient Create(ResolvedLlmCredential credential)
+            => throw new InvalidOperationException("No client should be created in these tests.");
     }
 }

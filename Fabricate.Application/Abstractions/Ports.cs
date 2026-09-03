@@ -348,6 +348,10 @@ public interface ITool
 {
     string Name { get; }
     string Description { get; }
+
+    /// <summary>JSON Schema for the tool's input object, advertised to the model. Defaults to an open object.</summary>
+    string InputSchemaJson => """{"type":"object","properties":{},"additionalProperties":true}""";
+
     Task<string> ExecuteAsync(string inputJson, Guid sessionId, Guid userId, CancellationToken cancellationToken = default);
 }
 
@@ -355,11 +359,34 @@ public interface IToolRegistry
 {
     void Register(ITool tool);
     ITool? Resolve(string toolName);
+
+    /// <summary>Tools the given workspace may invoke. Every registered tool unless an allowlist has been set.</summary>
     IReadOnlyList<string> AllowedTools(Guid workspaceId);
+
+    /// <summary>Restricts a workspace to the named tools. Unknown names are ignored.</summary>
+    void SetAllowedTools(Guid workspaceId, IReadOnlyList<string> toolNames);
 }
 
 public sealed record CreateChatSessionCommand(Guid WorkspaceId, Guid? ProjectId, Guid UserId, string Name, ChatMode Mode = ChatMode.Guided);
 public sealed record SendMessageCommand(Guid SessionId, Guid UserId, string Content);
+
+/// <summary>Everything one user message produced: the persisted user turn, the model's reply (if any), and tool activity.</summary>
+public sealed record ChatTurnResult(
+    ChatMessage UserMessage,
+    ChatMessage? AssistantMessage,
+    IReadOnlyList<ToolInvocation> ToolInvocations,
+    TokenUsage Usage,
+    LlmStopReason? StopReason);
+
+/// <summary>Incremental events emitted while a turn streams.</summary>
+public abstract record ChatStreamEvent
+{
+    public sealed record TextDelta(string Text) : ChatStreamEvent;
+    public sealed record ToolCallRequested(ToolInvocation Invocation) : ChatStreamEvent;
+    public sealed record ToolCompleted(ToolInvocation Invocation) : ChatStreamEvent;
+    public sealed record Notice(string Message) : ChatStreamEvent;
+    public sealed record Completed(ChatTurnResult Result) : ChatStreamEvent;
+}
 
 public interface IAgentChatService
 {
@@ -368,8 +395,18 @@ public interface IAgentChatService
     Task<ChatSession> ArchiveSessionAsync(Guid sessionId, Guid requestingUserId, CancellationToken cancellationToken = default);
     Task<ChatSession> ChangeMode(Guid sessionId, ChatMode mode, Guid requestingUserId, CancellationToken cancellationToken = default);
     Task<ChatSession> SetInstructionOverrideAsync(Guid sessionId, string? instructionOverride, Guid requestingUserId, CancellationToken cancellationToken = default);
-    Task<ChatMessage> SendMessageAsync(SendMessageCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>Persists the user message, runs the model/tool loop to completion, and returns the whole turn.</summary>
+    Task<ChatTurnResult> SendMessageAsync(SendMessageCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>Same as <see cref="SendMessageAsync"/> but yields incremental events; the last event is always <see cref="ChatStreamEvent.Completed"/>.</summary>
+    IAsyncEnumerable<ChatStreamEvent> StreamMessageAsync(SendMessageCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>Executes a tool call that was parked as <see cref="ToolInvocationStatus.Pending"/> under <see cref="ChatMode.ReviewRequired"/>.</summary>
+    Task<ToolInvocation> ApproveToolInvocationAsync(Guid sessionId, Guid invocationId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<ChatMessage>> GetHistoryAsync(Guid sessionId, Guid requestingUserId, int pageSize = 50, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ToolInvocation>> GetToolInvocationsAsync(Guid sessionId, Guid requestingUserId, CancellationToken cancellationToken = default);
     Task<string> GetComposedInstructionsAsync(Guid sessionId, CancellationToken cancellationToken = default);
 }
 
@@ -380,6 +417,8 @@ public interface ISessionRepository
     Task<ChatMessage> SaveMessageAsync(ChatMessage message, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid sessionId, int skip, int take, CancellationToken cancellationToken = default);
     Task<ToolInvocation> SaveInvocationAsync(ToolInvocation invocation, CancellationToken cancellationToken = default);
+    Task<ToolInvocation?> GetInvocationAsync(Guid invocationId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ToolInvocation>> ListInvocationsAsync(Guid sessionId, CancellationToken cancellationToken = default);
 }
 
 // ── #31: API key ports ────────────────────────────────────────────────────────
@@ -526,4 +565,72 @@ public interface INoSqlSchemaDiscovererFactory
 public interface INoSqlDataProfilerFactory
 {
     INoSqlDataProfiler GetProfiler(string providerName);
+}
+
+// ── #46/#47/#58/#60: LLM provider and bring-your-own-key ports ───────────────
+
+/// <summary>A configured, authenticated connection to one model provider.</summary>
+public interface IChatCompletionClient
+{
+    string ProviderId { get; }
+    ModelCapabilities Capabilities { get; }
+    Task<ChatCompletionResult> CompleteAsync(ChatCompletionRequest request, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<ChatCompletionChunk> StreamAsync(ChatCompletionRequest request, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Builds a client for a resolved credential. Implemented in Infrastructure; the only place vendor SDKs are referenced.</summary>
+public interface IChatCompletionClientFactory
+{
+    IChatCompletionClient Create(Llm.ResolvedLlmCredential credential);
+}
+
+/// <summary>Resolves which credential a chat turn executes under. Returns <c>null</c> when none is configured.</summary>
+public interface ILlmCredentialResolver
+{
+    Task<Llm.ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken cancellationToken = default);
+}
+
+public interface ILlmCredentialStore
+{
+    Task<LlmCredential> SaveAsync(LlmCredential credential, CancellationToken cancellationToken = default);
+    Task<LlmCredential?> GetByIdAsync(Guid credentialId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<LlmCredential>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<WorkspaceLlmPolicy?> GetPolicyAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<WorkspaceLlmPolicy> SavePolicyAsync(WorkspaceLlmPolicy policy, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Reversible encryption for tenant secrets. Distinct from <see cref="ISecretProvider"/>, which is read-only operator configuration.</summary>
+public interface ISecretCipher
+{
+    (string CipherText, string KeyVersion) Encrypt(string plaintext);
+    string Decrypt(string cipherText, string keyVersion);
+}
+
+/// <summary>Cheapest possible provider call that proves a credential works. Mocked in unit tests.</summary>
+public interface ILlmCredentialProbe
+{
+    Task<LlmCredentialValidationResult> ProbeAsync(Guid credentialId, Llm.ResolvedLlmCredential credential, CancellationToken cancellationToken = default);
+}
+
+public sealed record RegisterLlmCredentialCommand(
+    Guid WorkspaceId,
+    Guid? ProjectId,
+    string Name,
+    LlmProvider Provider,
+    LlmCredentialKind Kind,
+    string Secret,
+    string Model,
+    string? Endpoint = null,
+    IReadOnlyDictionary<string, string>? NonSecretSettings = null,
+    bool IsDefault = false);
+
+public interface ILlmCredentialService
+{
+    Task<LlmCredentialSummary> RegisterAsync(RegisterLlmCredentialCommand command, Guid requestingUserId, CancellationToken cancellationToken = default);
+    Task<LlmCredentialSummary> RotateAsync(Guid workspaceId, Guid credentialId, string newSecret, Guid requestingUserId, CancellationToken cancellationToken = default);
+    Task RevokeAsync(Guid workspaceId, Guid credentialId, Guid requestingUserId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<LlmCredentialSummary>> ListAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+    Task<LlmCredentialValidationResult> ValidateAsync(Guid workspaceId, Guid credentialId, Guid requestingUserId, CancellationToken cancellationToken = default);
+    Task<WorkspaceLlmPolicy> GetPolicyAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, CancellationToken cancellationToken = default);
 }
