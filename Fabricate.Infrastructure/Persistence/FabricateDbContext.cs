@@ -24,6 +24,21 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<LlmCredential> LlmCredentials => Set<LlmCredential>();
     public DbSet<WorkspaceLlmPolicy> WorkspaceLlmPolicies => Set<WorkspaceLlmPolicy>();
 
+    // #65 — platform aggregates that previously lived in service fields
+    public DbSet<Workspace> Workspaces => Set<Workspace>();
+    public DbSet<WorkspaceMembership> WorkspaceMemberships => Set<WorkspaceMembership>();
+    public DbSet<Connection> Connections => Set<Connection>();
+    public DbSet<InstructionVersion> InstructionVersions => Set<InstructionVersion>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectDatabase> ProjectDatabases => Set<ProjectDatabase>();
+    public DbSet<Workflow> Workflows => Set<Workflow>();
+    public DbSet<WorkflowStep> WorkflowSteps => Set<WorkflowStep>();
+    public DbSet<WorkflowRun> WorkflowRuns => Set<WorkflowRun>();
+    public DbSet<WorkflowStepRun> WorkflowStepRuns => Set<WorkflowStepRun>();
+    public DbSet<Skill> Skills => Set<Skill>();
+    public DbSet<WebhookRegistration> WebhookRegistrations => Set<WebhookRegistration>();
+    public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
+
     // Store all DateTimeOffset values as UTC ticks (long) so SQLite ORDER BY works correctly.
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -154,6 +169,107 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
                     v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v, (System.Text.Json.JsonSerializerOptions?)null)!);
             e.HasIndex(c => new { c.WorkspaceId, c.Name }).IsUnique().HasFilter("\"RevokedAt\" IS NULL");
             e.HasIndex(c => c.WorkspaceId);
+        });
+
+        // ── #65: platform aggregates ────────────────────────────────────────────
+        modelBuilder.Entity<Workspace>(e =>
+        {
+            e.HasKey(w => w.Id);
+            e.Property(w => w.Name).IsRequired().HasMaxLength(200);
+            e.HasIndex(w => w.AccountId);
+        });
+
+        modelBuilder.Entity<WorkspaceMembership>(e =>
+        {
+            e.HasKey(m => new { m.WorkspaceId, m.PrincipalId, m.IsGroup });
+        });
+
+        modelBuilder.Entity<Connection>(e =>
+        {
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Name).IsRequired().HasMaxLength(200);
+            e.Property(c => c.Provider).IsRequired().HasMaxLength(100);
+            e.Property(c => c.Status).IsRequired().HasMaxLength(50);
+            e.HasIndex(c => c.WorkspaceId);
+        });
+
+        modelBuilder.Entity<InstructionVersion>(e =>
+        {
+            e.HasKey(v => v.Id);
+            e.Property(v => v.Content).IsRequired();
+            e.HasIndex(v => new { v.WorkspaceId, v.Version });
+            e.HasIndex(v => v.ProjectId);
+        });
+
+        modelBuilder.Entity<Project>(e =>
+        {
+            e.HasKey(p => p.Id);
+            e.Property(p => p.Name).IsRequired().HasMaxLength(200);
+            e.HasIndex(p => p.WorkspaceId);
+        });
+
+        modelBuilder.Entity<ProjectDatabase>(e =>
+        {
+            e.HasKey(d => d.Id);
+            e.Property(d => d.Name).IsRequired().HasMaxLength(200);
+            e.Property(d => d.Provider).IsRequired().HasMaxLength(100);
+            e.Property(d => d.Status).IsRequired().HasMaxLength(50);
+            e.HasIndex(d => d.ProjectId);
+        });
+
+        modelBuilder.Entity<Workflow>(e =>
+        {
+            e.HasKey(w => w.Id);
+            e.Property(w => w.Name).IsRequired().HasMaxLength(200);
+            e.HasIndex(w => w.WorkspaceId);
+        });
+
+        modelBuilder.Entity<WorkflowStep>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.Property(s => s.StepType).IsRequired().HasMaxLength(100);
+            e.HasIndex(s => s.WorkflowId);
+        });
+
+        modelBuilder.Entity<WorkflowRun>(e =>
+        {
+            e.HasKey(r => r.Id);
+            e.HasIndex(r => r.WorkflowId);
+        });
+
+        modelBuilder.Entity<WorkflowStepRun>(e =>
+        {
+            e.HasKey(sr => sr.Id);
+            e.HasIndex(sr => sr.WorkflowRunId);
+        });
+
+        modelBuilder.Entity<Skill>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.Property(s => s.Name).IsRequired().HasMaxLength(200);
+            e.Property(s => s.AllowedTools)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null)!);
+            e.HasIndex(s => s.WorkspaceId);
+        });
+
+        modelBuilder.Entity<WebhookRegistration>(e =>
+        {
+            e.HasKey(w => w.Id);
+            e.Property(w => w.Url).IsRequired().HasMaxLength(2048);
+            e.Property(w => w.Events)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, (System.Text.Json.JsonSerializerOptions?)null)!);
+            e.HasIndex(w => w.WorkspaceId);
+        });
+
+        modelBuilder.Entity<WebhookDelivery>(e =>
+        {
+            e.HasKey(d => d.Id);
+            e.Property(d => d.Event).IsRequired().HasMaxLength(200);
+            e.HasIndex(d => d.WebhookId);
         });
 
         modelBuilder.Entity<WorkspaceLlmPolicy>(e =>

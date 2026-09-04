@@ -31,13 +31,13 @@ public sealed class PromptInjectionTests
     public PromptInjectionTests()
     {
         var audit = new AuditLogService(new InMemoryAuditLogRepository());
-        _workspaceService = new WorkspaceService(audit);
+        _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), audit);
         _toolRegistry.Register(_dangerous);
         _toolRegistry.Register(_lookup);
 
         var credential = new ResolvedLlmCredential(LlmProvider.Anthropic, LlmCredentialKind.ApiKey, "claude-opus-5", "sk-test", null,
             new Dictionary<string, string>(), LlmCredentialSource.WorkspaceDefault);
-        _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, new InstructionVersionService(_workspaceService),
+        _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService),
             new FixedResolver(credential), new FixedFactory(_client), new HeuristicTokenBudgetEstimator(), _policyStore, new LlmOptions());
     }
 

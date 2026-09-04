@@ -3,18 +3,18 @@ using Fabricate.Domain.Models;
 
 namespace Fabricate.Application.Projects;
 
-public sealed class ProjectDatabaseCatalog(IProjectRepository projectRepository, IWorkspaceService workspaceService) : IProjectDatabaseCatalog
+public sealed class ProjectDatabaseCatalog(
+    IProjectDatabaseRepository databaseRepository,
+    IProjectRepository projectRepository,
+    IWorkspaceService workspaceService) : IProjectDatabaseCatalog
 {
-    private readonly List<ProjectDatabase> _databases = [];
-
     public async Task<ProjectDatabase> AddAsync(AddDatabaseCommand command, CancellationToken cancellationToken = default)
     {
         var workspaceId = await GetWorkspaceIdOrThrowAsync(command.ProjectId, cancellationToken).ConfigureAwait(false);
         await RequireEditorAsync(workspaceId, command.RequestingUserId, cancellationToken).ConfigureAwait(false);
 
         var db = new ProjectDatabase(Guid.NewGuid(), command.ProjectId, command.Name, command.Type, command.Provider, "active", command.ConnectionRefId, DateTimeOffset.UtcNow);
-        _databases.Add(db);
-        return db;
+        return await databaseRepository.SaveAsync(db, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<ProjectDatabase>> ListAsync(Guid projectId, Guid requestingUserId, CancellationToken cancellationToken = default)
@@ -22,16 +22,17 @@ public sealed class ProjectDatabaseCatalog(IProjectRepository projectRepository,
         var workspaceId = await GetWorkspaceIdOrThrowAsync(projectId, cancellationToken).ConfigureAwait(false);
         var role = await workspaceService.GetEffectiveRoleAsync(workspaceId, requestingUserId, cancellationToken).ConfigureAwait(false);
         if (!role.HasValue) throw new UnauthorizedAccessException("Access denied.");
-        return _databases.Where(d => d.ProjectId == projectId).ToArray();
+        return await databaseRepository.ListByProjectAsync(projectId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task RemoveAsync(Guid databaseId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        var db = _databases.Find(d => d.Id == databaseId);
-        if (db is null) throw new InvalidOperationException($"Database '{databaseId}' not found.");
+        var db = await databaseRepository.GetByIdAsync(databaseId, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"Database '{databaseId}' not found.");
+
         var workspaceId = await GetWorkspaceIdOrThrowAsync(db.ProjectId, cancellationToken).ConfigureAwait(false);
         await RequireEditorAsync(workspaceId, requestingUserId, cancellationToken).ConfigureAwait(false);
-        _databases.RemoveAll(d => d.Id == databaseId);
+        await databaseRepository.DeleteAsync(databaseId, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<Guid> GetWorkspaceIdOrThrowAsync(Guid projectId, CancellationToken cancellationToken)
@@ -50,4 +51,3 @@ public sealed class ProjectDatabaseCatalog(IProjectRepository projectRepository,
         }
     }
 }
-

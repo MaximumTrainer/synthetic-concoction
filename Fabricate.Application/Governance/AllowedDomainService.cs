@@ -4,18 +4,17 @@ using Fabricate.Domain.Models;
 namespace Fabricate.Application.Governance;
 
 public sealed class AllowedDomainService(
+    IAllowedDomainRepository domainRepository,
     IAccountRepository accountRepository,
     IAuditLogService auditLogService) : IAllowedDomainService
 {
-    private readonly List<AllowedDomain> _domains = [];
-
     public async Task<AllowedDomain> AddDomainAsync(Guid accountId, string domain, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
         await RequireOwnerAsync(accountId, requestingUserId, cancellationToken).ConfigureAwait(false);
 
         var normalised = domain.Trim().ToLowerInvariant();
         var entry = new AllowedDomain(Guid.NewGuid(), accountId, normalised, DateTimeOffset.UtcNow);
-        _domains.Add(entry);
+        await domainRepository.SaveAsync(entry, cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), accountId, requestingUserId,
@@ -28,7 +27,7 @@ public sealed class AllowedDomainService(
     public async Task RemoveDomainAsync(Guid domainId, Guid requestingUserId, Guid accountId, CancellationToken cancellationToken = default)
     {
         await RequireOwnerAsync(accountId, requestingUserId, cancellationToken).ConfigureAwait(false);
-        _domains.RemoveAll(d => d.Id == domainId);
+        await domainRepository.DeleteAsync(domainId, cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), accountId, requestingUserId,
@@ -36,28 +35,29 @@ public sealed class AllowedDomainService(
             Guid.NewGuid().ToString(), DateTimeOffset.UtcNow), cancellationToken).ConfigureAwait(false);
     }
 
-    public Task<bool> IsEmailAllowedAsync(Guid accountId, string email, CancellationToken cancellationToken = default)
+    public async Task<bool> IsEmailAllowedAsync(Guid accountId, string email, CancellationToken cancellationToken = default)
     {
-        var accountDomains = _domains.Where(d => d.AccountId == accountId).Select(d => d.Domain).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var domains = await domainRepository.ListByAccountAsync(accountId, cancellationToken).ConfigureAwait(false);
+        var accountDomains = domains.Select(d => d.Domain).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // If no domains are configured, allow all emails (open account).
         if (accountDomains.Count == 0)
         {
-            return Task.FromResult(true);
+            return true;
         }
 
         var atIndex = email.IndexOf('@', StringComparison.Ordinal);
         if (atIndex < 0)
         {
-            return Task.FromResult(false);
+            return false;
         }
 
         var emailDomain = email[(atIndex + 1)..].ToLowerInvariant();
-        return Task.FromResult(accountDomains.Contains(emailDomain));
+        return accountDomains.Contains(emailDomain);
     }
 
     public Task<IReadOnlyList<AllowedDomain>> ListDomainsAsync(Guid accountId, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<AllowedDomain>>(_domains.Where(d => d.AccountId == accountId).ToArray());
+        => domainRepository.ListByAccountAsync(accountId, cancellationToken);
 
     private async Task RequireOwnerAsync(Guid accountId, Guid userId, CancellationToken cancellationToken)
     {

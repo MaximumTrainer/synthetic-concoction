@@ -3,17 +3,19 @@ using Fabricate.Domain.Models;
 
 namespace Fabricate.Application.Workspaces;
 
-public sealed class WorkspaceService(IAuditLogService auditLogService) : IWorkspaceService
+public sealed class WorkspaceService(
+    IWorkspaceRepository workspaceRepository,
+    IAccountGroupRepository accountGroupRepository,
+    IAuditLogService auditLogService) : IWorkspaceService
 {
-    private readonly List<Workspace> _workspaces = [];
-    private readonly List<WorkspaceMembership> _memberships = [];
-
     public async Task<Workspace> CreateAsync(CreateWorkspaceCommand command, CancellationToken cancellationToken = default)
     {
         var workspace = new Workspace(Guid.NewGuid(), command.AccountId, command.Name, DateTimeOffset.UtcNow);
-        _workspaces.Add(workspace);
+        await workspaceRepository.SaveAsync(workspace, cancellationToken).ConfigureAwait(false);
 
-        _memberships.Add(new WorkspaceMembership(workspace.Id, command.CreatedByUserId, false, WorkspaceRole.Admin, DateTimeOffset.UtcNow));
+        await workspaceRepository.SaveMembershipAsync(
+            new WorkspaceMembership(workspace.Id, command.CreatedByUserId, false, WorkspaceRole.Admin, DateTimeOffset.UtcNow),
+            cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), command.AccountId, command.CreatedByUserId,
@@ -25,7 +27,7 @@ public sealed class WorkspaceService(IAuditLogService auditLogService) : IWorksp
 
     public async Task<Workspace?> GetByIdAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        var workspace = _workspaces.Find(w => w.Id == workspaceId);
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId, cancellationToken).ConfigureAwait(false);
         if (workspace is null) return null;
 
         var role = await GetEffectiveRoleAsync(workspaceId, requestingUserId, cancellationToken).ConfigureAwait(false);
@@ -36,19 +38,11 @@ public sealed class WorkspaceService(IAuditLogService auditLogService) : IWorksp
     {
         await RequireAdminAsync(command.WorkspaceId, command.RequestingUserId, cancellationToken).ConfigureAwait(false);
 
-        var existing = _memberships.FindIndex(m => m.WorkspaceId == command.WorkspaceId && m.PrincipalId == command.PrincipalId && m.IsGroup == command.IsGroup);
-        var membership = new WorkspaceMembership(command.WorkspaceId, command.PrincipalId, command.IsGroup, command.Role, DateTimeOffset.UtcNow);
+        await workspaceRepository.SaveMembershipAsync(
+            new WorkspaceMembership(command.WorkspaceId, command.PrincipalId, command.IsGroup, command.Role, DateTimeOffset.UtcNow),
+            cancellationToken).ConfigureAwait(false);
 
-        if (existing >= 0)
-        {
-            _memberships[existing] = membership;
-        }
-        else
-        {
-            _memberships.Add(membership);
-        }
-
-        var workspace = _workspaces.Find(w => w.Id == command.WorkspaceId);
+        var workspace = await workspaceRepository.GetByIdAsync(command.WorkspaceId, cancellationToken).ConfigureAwait(false);
         if (workspace is not null)
         {
             await auditLogService.RecordAsync(new AuditEvent(
@@ -61,15 +55,38 @@ public sealed class WorkspaceService(IAuditLogService auditLogService) : IWorksp
     public async Task RevokeAccessAsync(Guid workspaceId, Guid principalId, bool isGroup, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
         await RequireAdminAsync(workspaceId, requestingUserId, cancellationToken).ConfigureAwait(false);
-        _memberships.RemoveAll(m => m.WorkspaceId == workspaceId && m.PrincipalId == principalId && m.IsGroup == isGroup);
+        await workspaceRepository.RemoveMembershipAsync(workspaceId, principalId, isGroup, cancellationToken).ConfigureAwait(false);
     }
 
-    public Task<WorkspaceRole?> GetEffectiveRoleAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The highest role the user holds on the workspace, whether granted directly or through an account group
+    /// they belong to (#67). Returns null when they hold none.
+    /// </summary>
+    public async Task<WorkspaceRole?> GetEffectiveRoleAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var direct = _memberships.FirstOrDefault(m => m.WorkspaceId == workspaceId && m.PrincipalId == userId && !m.IsGroup);
-        WorkspaceRole? role = direct is not null ? direct.Role : null;
-        return Task.FromResult(role);
+        var memberships = await workspaceRepository.ListMembershipsAsync(workspaceId, cancellationToken).ConfigureAwait(false);
+
+        WorkspaceRole? effective = null;
+        foreach (var membership in memberships.Where(m => !m.IsGroup && m.PrincipalId == userId))
+        {
+            effective = Max(effective, membership.Role);
+        }
+
+        var groupGrants = memberships.Where(m => m.IsGroup).ToArray();
+        if (groupGrants.Length > 0)
+        {
+            var userGroups = await accountGroupRepository.ListGroupIdsForUserAsync(userId, cancellationToken).ConfigureAwait(false);
+            foreach (var grant in groupGrants.Where(g => userGroups.Contains(g.PrincipalId)))
+            {
+                effective = Max(effective, grant.Role);
+            }
+        }
+
+        return effective;
     }
+
+    private static WorkspaceRole Max(WorkspaceRole? current, WorkspaceRole candidate)
+        => current is null || candidate > current ? candidate : current.Value;
 
     private async Task RequireAdminAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken)
     {

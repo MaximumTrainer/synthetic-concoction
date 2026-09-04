@@ -34,6 +34,8 @@ public sealed class SecretRedactionTests
         services.AddLogging(b => b.AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
         services.AddSingleton<IAuditLogRepository>(audit);
         services.AddSingleton<IAuditLogService, AuditLogService>();
+        services.AddSingleton<IWorkspaceRepository, InMemoryWorkspaceRepository>();
+        services.AddSingleton<IAccountGroupRepository, InMemoryAccountGroupRepository>();
         services.AddSingleton<IWorkspaceService, WorkspaceService>();
         services.AddSingleton<ISecretProvider, EnvSecretProviderStub>();
         services.AddFabricateLlm(new LlmOptions { AllowPrivateEndpoints = true });

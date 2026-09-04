@@ -11,8 +11,7 @@ namespace Fabricate.Api;
 /// The bootstrap account ID is always <see cref="BootstrapAccountId"/>.
 /// </summary>
 public sealed class StartupBootstrapService(
-    IApiKeyStore apiKeyStore,
-    IAccountRepository accountRepository,
+    IServiceScopeFactory scopeFactory,
     IConfiguration configuration,
     ILogger<StartupBootstrapService> logger) : IHostedService
 {
@@ -26,6 +25,12 @@ public sealed class StartupBootstrapService(
 
         if (string.IsNullOrWhiteSpace(plaintextKey))
             return;
+
+        // A hosted service is a singleton, so the repositories (scoped once persistence is enabled) must be
+        // resolved from a scope created here rather than injected — otherwise this captures a DbContext (#78).
+        using var scope = scopeFactory.CreateScope();
+        var apiKeyStore = scope.ServiceProvider.GetRequiredService<IApiKeyStore>();
+        var accountRepository = scope.ServiceProvider.GetRequiredService<IAccountRepository>();
 
         logger.LogInformation("Bootstrap API key detected — seeding bootstrap account and key.");
 

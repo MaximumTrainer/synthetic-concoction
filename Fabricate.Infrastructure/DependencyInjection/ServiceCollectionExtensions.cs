@@ -57,27 +57,27 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISyntheticDataOrchestrator, SyntheticDataOrchestrator>();
         services.AddSingleton<ISchemaReviewService, SchemaReviewService>();
         services.AddSingleton<IGenerationPlanService, GenerationPlanService>();
-        services.AddSingleton<RunLifecycleService>();
+        services.AddScoped<RunLifecycleService>();
 
         // #26 — accounts
-        services.AddSingleton<IAccountService, AccountService>();
-        services.AddSingleton<IInvitationService, InvitationService>();
-        services.AddSingleton<IUserProfileService, UserProfileService>();
+        services.AddScoped<IAccountService, AccountService>();
+        services.AddScoped<IInvitationService, InvitationService>();
+        services.AddScoped<IUserProfileService, UserProfileService>();
 
         // #27 — governance
-        services.AddSingleton<IAccountGroupService, AccountGroupService>();
-        services.AddSingleton<IAllowedDomainService, AllowedDomainService>();
-        services.AddSingleton<IAuditLogService, AuditLogService>();
+        services.AddScoped<IAccountGroupService, AccountGroupService>();
+        services.AddScoped<IAllowedDomainService, AllowedDomainService>();
+        services.AddScoped<IAuditLogService, AuditLogService>();
 
         // #28 — workspaces
-        services.AddSingleton<IWorkspaceService, WorkspaceService>();
-        services.AddSingleton<IConnectionCatalogService, ConnectionCatalogService>();
-        services.AddSingleton<IInstructionVersionService, InstructionVersionService>();
+        services.AddScoped<IWorkspaceService, WorkspaceService>();
+        services.AddScoped<IConnectionCatalogService, ConnectionCatalogService>();
+        services.AddScoped<IInstructionVersionService, InstructionVersionService>();
 
         // #29 — projects
         services.AddSingleton<IProjectRepository, InMemoryProjectRepository>();
-        services.AddSingleton<IProjectService, ProjectService>();
-        services.AddSingleton<IProjectDatabaseCatalog, ProjectDatabaseCatalog>();
+        services.AddScoped<IProjectService, ProjectService>();
+        services.AddScoped<IProjectDatabaseCatalog, ProjectDatabaseCatalog>();
 
         // #30 — chat
         services.AddSingleton<IToolRegistry>(sp =>
@@ -88,22 +88,24 @@ public static class ServiceCollectionExtensions
             registry.Register(new GenerateDataTool(sp.GetRequiredService<ISyntheticDataOrchestrator>()));
             return registry;
         });
-        services.AddSingleton<IAgentChatService, AgentChatService>();
+        services.AddScoped<IAgentChatService, AgentChatService>();
 
         // #31 — API keys
-        services.AddSingleton<IApiKeyService, ApiKeyService>();
+        services.AddScoped<IApiKeyService, ApiKeyService>();
 
         // #24 — workflows
-        services.AddSingleton<IWorkflowService, WorkflowService>();
-        services.AddSingleton<ISkillRegistry, SkillRegistryService>();
+        services.AddScoped<IWorkflowService, WorkflowService>();
+        services.AddScoped<ISkillRegistry, SkillRegistryService>();
         services.AddSingleton<IApiContractIngestionService, OpenApiContractIngestionService>();
 
         // #13 — schema/profile snapshots
+        // Snapshot services still hold their own in-memory state (no repository yet — see #75), so they stay singleton:
+        // scoping them would discard snapshots between requests. They consume nothing scoped, so no captive dependency.
         services.AddSingleton<ISchemaSnapshotService, SchemaSnapshotService>();
         services.AddSingleton<IProfileSnapshotService, ProfileSnapshotService>();
 
         // #43 — webhooks
-        services.AddSingleton<IWebhookService, WebhookService>();
+        services.AddScoped<IWebhookService, WebhookService>();
 
         return services;
     }
@@ -163,9 +165,21 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISecretProvider, EnvSecretProvider>();
         services.AddSingleton<IWebhookRepository, InMemoryWebhookRepository>();
 
+        // #65 — the remaining platform aggregates. Singletons here because the in-memory adapters *are* the store;
+        // AddFabricatePersistence replaces every one with a scoped EF adapter.
+        services.AddSingleton<IWorkspaceRepository, InMemoryWorkspaceRepository>();
+        services.AddSingleton<IConnectionRepository, InMemoryConnectionRepository>();
+        services.AddSingleton<IInstructionVersionRepository, InMemoryInstructionVersionRepository>();
+        services.AddSingleton<IProjectDatabaseRepository, InMemoryProjectDatabaseRepository>();
+        services.AddSingleton<IWorkflowRepository, InMemoryWorkflowRepository>();
+        services.AddSingleton<ISkillRepository, InMemorySkillRepository>();
+        services.AddSingleton<IAccountGroupRepository, InMemoryAccountGroupRepository>();
+        services.AddSingleton<IAllowedDomainRepository, InMemoryAllowedDomainRepository>();
+
         // HTTP delivery for webhooks
         services.AddHttpClient("webhook", c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddSingleton<IWebhookDeliveryService, HttpWebhookDeliveryService>();
+        // Consumes IWebhookRepository, which is scoped once persistence is enabled (#78).
+        services.AddScoped<IWebhookDeliveryService, HttpWebhookDeliveryService>();
 
         // #52 — NoSQL schema discoverer stubs (full implementations tracked in issues #53–#56)
         services.AddSingleton<INoSqlSchemaDiscoverer, CosmosDbSchemaDiscoverer>();
@@ -204,9 +218,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISecretCipher, DataProtectionSecretCipher>();
         services.AddSingleton<ILlmCredentialStore, InMemoryLlmCredentialStore>();
         services.AddSingleton<IChatCompletionClientFactory, ChatCompletionClientFactory>();
-        services.AddSingleton<ILlmCredentialProbe, ChatCompletionCredentialProbe>();
-        services.AddSingleton<ILlmCredentialResolver, LlmCredentialResolver>();
-        services.AddSingleton<ILlmCredentialService, LlmCredentialService>();
+        services.AddScoped<ILlmCredentialProbe, ChatCompletionCredentialProbe>();
+        services.AddScoped<ILlmCredentialResolver, LlmCredentialResolver>();
+        services.AddScoped<ILlmCredentialService, LlmCredentialService>();
         services.AddSingleton<ITokenBudgetEstimator, HeuristicTokenBudgetEstimator>();
 
         return services;

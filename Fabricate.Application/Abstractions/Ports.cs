@@ -323,6 +323,80 @@ public interface IProjectRepository
     Task<IReadOnlyList<Project>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
 }
 
+// ── #65: repositories for the remaining platform aggregates ──────────────────
+// These aggregates previously lived in List<> fields inside their Application services, so they were lost on
+// restart even with a database configured. Every one now has an in-memory and an EF adapter.
+
+public interface IWorkspaceRepository
+{
+    Task<Workspace> SaveAsync(Workspace workspace, CancellationToken cancellationToken = default);
+    Task<Workspace?> GetByIdAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Workspace>> ListByAccountAsync(Guid accountId, CancellationToken cancellationToken = default);
+    Task<WorkspaceMembership> SaveMembershipAsync(WorkspaceMembership membership, CancellationToken cancellationToken = default);
+    Task RemoveMembershipAsync(Guid workspaceId, Guid principalId, bool isGroup, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WorkspaceMembership>> ListMembershipsAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+public interface IConnectionRepository
+{
+    Task<Connection> SaveAsync(Connection connection, CancellationToken cancellationToken = default);
+    Task<Connection?> GetByIdAsync(Guid connectionId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Connection>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid connectionId, CancellationToken cancellationToken = default);
+}
+
+public interface IInstructionVersionRepository
+{
+    Task<InstructionVersion> SaveAsync(InstructionVersion version, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InstructionVersion>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InstructionVersion>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+}
+
+public interface IProjectDatabaseRepository
+{
+    Task<ProjectDatabase> SaveAsync(ProjectDatabase database, CancellationToken cancellationToken = default);
+    Task<ProjectDatabase?> GetByIdAsync(Guid databaseId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProjectDatabase>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid databaseId, CancellationToken cancellationToken = default);
+}
+
+public interface IWorkflowRepository
+{
+    Task<Workflow> SaveAsync(Workflow workflow, CancellationToken cancellationToken = default);
+    Task<Workflow?> GetByIdAsync(Guid workflowId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Workflow>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<WorkflowStep> SaveStepAsync(WorkflowStep step, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WorkflowStep>> ListStepsAsync(Guid workflowId, CancellationToken cancellationToken = default);
+    Task<WorkflowRun> SaveRunAsync(WorkflowRun run, CancellationToken cancellationToken = default);
+    Task<WorkflowRun?> GetRunAsync(Guid runId, CancellationToken cancellationToken = default);
+    Task<WorkflowStepRun> SaveStepRunAsync(WorkflowStepRun stepRun, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WorkflowStepRun>> ListStepRunsAsync(Guid runId, CancellationToken cancellationToken = default);
+}
+
+public interface ISkillRepository
+{
+    Task<Skill> SaveAsync(Skill skill, CancellationToken cancellationToken = default);
+    Task<Skill?> GetByIdAsync(Guid skillId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Skill>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+public interface IAccountGroupRepository
+{
+    Task<AccountGroup> SaveAsync(AccountGroup group, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AccountGroup>> ListByAccountAsync(Guid accountId, CancellationToken cancellationToken = default);
+    Task<GroupMembership> AddMemberAsync(GroupMembership membership, CancellationToken cancellationToken = default);
+    Task RemoveMemberAsync(Guid groupId, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>Groups the user belongs to, across the whole instance; callers scope by account.</summary>
+    Task<IReadOnlyList<Guid>> ListGroupIdsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+}
+
+public interface IAllowedDomainRepository
+{
+    Task<AllowedDomain> SaveAsync(AllowedDomain domain, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AllowedDomain>> ListByAccountAsync(Guid accountId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid domainId, CancellationToken cancellationToken = default);
+}
+
 public sealed record CreateProjectCommand(Guid WorkspaceId, string Name, Guid CreatedByUserId);
 public sealed record AddDatabaseCommand(Guid ProjectId, string Name, ProjectDatabaseType Type, string Provider, Guid? ConnectionRefId, Guid RequestingUserId);
 
