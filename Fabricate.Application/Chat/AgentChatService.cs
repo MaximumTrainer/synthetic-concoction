@@ -88,7 +88,7 @@ public sealed class AgentChatService(
         var session = await GetSessionOrThrowAsync(sessionId, requestingUserId, cancellationToken).ConfigureAwait(false);
 
         var role = await workspaceService.GetEffectiveRoleAsync(session.WorkspaceId, requestingUserId, cancellationToken).ConfigureAwait(false);
-        if (role < WorkspaceRole.Editor)
+        if (role is null or < WorkspaceRole.Editor)
         {
             throw new UnauthorizedAccessException("Only workspace editors or admins can approve tool calls.");
         }

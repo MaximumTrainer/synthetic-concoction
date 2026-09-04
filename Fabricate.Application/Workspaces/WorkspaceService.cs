@@ -91,7 +91,7 @@ public sealed class WorkspaceService(
     private async Task RequireAdminAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken)
     {
         var role = await GetEffectiveRoleAsync(workspaceId, userId, cancellationToken).ConfigureAwait(false);
-        if (role < WorkspaceRole.Admin)
+        if (role is null or < WorkspaceRole.Admin)
         {
             throw new UnauthorizedAccessException("Only workspace admins can manage workspace access.");
         }

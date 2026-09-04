@@ -45,7 +45,7 @@ public sealed class ProjectDatabaseCatalog(
     private async Task RequireEditorAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken)
     {
         var role = await workspaceService.GetEffectiveRoleAsync(workspaceId, userId, cancellationToken).ConfigureAwait(false);
-        if (role < WorkspaceRole.Editor)
+        if (role is null or < WorkspaceRole.Editor)
         {
             throw new UnauthorizedAccessException("Workspace Editor or Admin role required.");
         }
