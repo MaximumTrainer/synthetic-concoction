@@ -31,13 +31,21 @@ public sealed record GenerationPlan(
         : this(orderedTables, cycles, diagnostics, []) { }
 }
 
+/// <summary>
+/// The outcome of a run plus the metadata needed to reproduce it (#16, #80): the seed, the schema it ran against
+/// and the compliance profile. Everything except the timestamps is a function of the inputs, so two runs with the
+/// same inputs produce equal reproducibility fields.
+/// </summary>
 public sealed record RunSummary(
     DateTimeOffset StartedAt,
     DateTimeOffset CompletedAt,
     int TableCount,
     int RowCount,
     int ValidationIssueCount,
-    IReadOnlyList<string> Messages);
+    IReadOnlyList<string> Messages,
+    long Seed = 0,
+    string? SchemaName = null,
+    ComplianceProfile ComplianceProfile = ComplianceProfile.Default);
 
 /// <summary>Records the compliance decision made for a single column, including the source of the strategy.</summary>
 public sealed record ComplianceDecision(

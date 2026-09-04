@@ -93,7 +93,8 @@ public sealed class SyntheticDataOrchestrator(
                 keyPool[table.QualifiedName] = pkBuffer;
         }
 
-        return new RunSummary(startedAt, DateTimeOffset.UtcNow, tableCount, totalRows, 0, plan.Diagnostics);
+        return new RunSummary(startedAt, DateTimeOffset.UtcNow, tableCount, totalRows, 0, plan.Diagnostics,
+            request.Seed, request.Schema.Name, request.ComplianceProfile);
     }
 
     public async Task<(GenerationResult Result, RunSummary Summary)> GenerateAsync(GenerationRequest request, CancellationToken cancellationToken = default)
@@ -169,7 +170,10 @@ public sealed class SyntheticDataOrchestrator(
             tableData.Count,
             tableData.Sum(static t => t.Rows.Count),
             issues.Count,
-            plan.Diagnostics);
+            plan.Diagnostics,
+            request.Seed,
+            request.Schema.Name,
+            request.ComplianceProfile);
 
         return (result, summary);
     }

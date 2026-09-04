@@ -5,6 +5,15 @@ namespace Fabricate.Application.Generation;
 
 public static class DefaultGeneratorRegistration
 {
+    // Default temporal ranges are fixed, not anchored on the clock. Anchoring them on DateTime.UtcNow made every
+    // date and timestamp shift with wall-clock time, so two runs with the same seed produced different data —
+    // breaking the reproducibility guarantee for any schema with a temporal column (#80). Callers that want a
+    // different window set minValue/maxValue in the rules file.
+    private static readonly DateOnly DefaultMinDate = new(2000, 1, 1);
+    private static readonly DateOnly DefaultMaxDate = new(2035, 1, 1);
+    private static readonly DateTimeOffset DefaultMinTimestamp = new(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset DefaultMaxTimestamp = new(2035, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
     // First-name and last-name word lists for realistic deterministic name generation.
     private static readonly string[] FirstNames =
     [
@@ -89,30 +98,24 @@ public static class DefaultGeneratorRegistration
         registry.Register(DataKind.Date, (ctx, _) =>
         {
             var rule = FindColumnRule(ctx);
-            var minDate = rule?.MinValue is not null && DateOnly.TryParse(rule.MinValue, out var mn) ? mn : DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-3650));
-            var maxDate = rule?.MaxValue is not null && DateOnly.TryParse(rule.MaxValue, out var mx) ? mx : DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3650));
+            var minDate = rule?.MinValue is not null && DateOnly.TryParse(rule.MinValue, out var mn) ? mn : DefaultMinDate;
+            var maxDate = rule?.MaxValue is not null && DateOnly.TryParse(rule.MaxValue, out var mx) ? mx : DefaultMaxDate;
             var totalDays = (maxDate.DayNumber - minDate.DayNumber);
             if (totalDays <= 0) totalDays = 1;
             return new ValueTask<object?>(minDate.AddDays(random.NextInt(Scope(ctx), 0, totalDays + 1)));
         });
-        registry.Register(DataKind.DateTime, (ctx, _) =>
+        registry.Register(DataKind.DateTime, (ctx, _) => new ValueTask<object?>(GenerateTimestamp(ctx)));
+        registry.Register(DataKind.TimestampTz, (ctx, _) => new ValueTask<object?>(GenerateTimestamp(ctx)));
+
+        DateTimeOffset GenerateTimestamp(GeneratorContext ctx)
         {
             var rule = FindColumnRule(ctx);
-            var minDt = rule?.MinValue is not null && DateTimeOffset.TryParse(rule.MinValue, out var mn) ? mn : DateTimeOffset.UtcNow.AddMinutes(-1_000_000);
-            var maxDt = rule?.MaxValue is not null && DateTimeOffset.TryParse(rule.MaxValue, out var mx) ? mx : DateTimeOffset.UtcNow.AddMinutes(1_000_000);
+            var minDt = rule?.MinValue is not null && DateTimeOffset.TryParse(rule.MinValue, out var mn) ? mn : DefaultMinTimestamp;
+            var maxDt = rule?.MaxValue is not null && DateTimeOffset.TryParse(rule.MaxValue, out var mx) ? mx : DefaultMaxTimestamp;
             var totalMinutes = (long)(maxDt - minDt).TotalMinutes;
             if (totalMinutes <= 0) totalMinutes = 1;
-            return new ValueTask<object?>(minDt.AddMinutes(random.NextLong(Scope(ctx), 0, totalMinutes + 1)));
-        });
-        registry.Register(DataKind.TimestampTz, (ctx, _) =>
-        {
-            var rule = FindColumnRule(ctx);
-            var minDt = rule?.MinValue is not null && DateTimeOffset.TryParse(rule.MinValue, out var mn) ? mn : DateTimeOffset.UtcNow.AddMinutes(-1_000_000);
-            var maxDt = rule?.MaxValue is not null && DateTimeOffset.TryParse(rule.MaxValue, out var mx) ? mx : DateTimeOffset.UtcNow.AddMinutes(1_000_000);
-            var totalMinutes = (long)(maxDt - minDt).TotalMinutes;
-            if (totalMinutes <= 0) totalMinutes = 1;
-            return new ValueTask<object?>(minDt.AddMinutes(random.NextLong(Scope(ctx), 0, totalMinutes + 1)));
-        });
+            return minDt.AddMinutes(random.NextLong(Scope(ctx), 0, totalMinutes + 1));
+        }
         registry.Register(DataKind.Json, (ctx, _) => new ValueTask<object?>($"{{\"id\":\"{random.NextToken(Scope(ctx), 8)}\"}}"));
         registry.Register(DataKind.Binary, (ctx, _) =>
         {
