@@ -63,8 +63,8 @@
 <p>Provider notes:</p>
 <ul><li><strong>anthropic</strong> — the official Anthropic API. The adapter sends adaptive thinking and effort and never sends sampling</li></ul>
 <p>parameters or <code>budget_tokens</code>, which current Claude models reject.</p>
-<ul><li><strong>openai-compatible</strong> — one adapter for OpenAI, Azure OpenAI, vLLM, Ollama and gateways such as OpenRouter. A</li></ul>
-<p>keyless local runtime works with <code>FABRICATE_LLM_API_KEY_SECRET</code> unset.</p>
+<ul><li><strong>openai-compatible</strong> — one adapter for OpenAI, Azure OpenAI, Gemini's OpenAI-compatible endpoint, vLLM, Ollama</li></ul>
+<p>and gateways such as OpenRouter. A keyless local runtime works with <code>FABRICATE_LLM_API_KEY_SECRET</code> unset. Azure OpenAI is recognised by its host: the key is sent as the <code>api-key</code> header Azure requires, and a bare resource URL is completed with <code>/openai/deployments/&lt;model&gt;/chat/completions?api-version=…</code> (the model id is the deployment name).</p>
 <ul><li><strong>bedrock / vertex / foundry</strong> — Claude through your cloud account, authenticated by IAM / ADC / a Foundry key.</li></ul>
 <p>Bedrock model ids take the <code>anthropic.</code> prefix (e.g. <code>anthropic.claude-opus-5</code>); Vertex uses the bare id.</p>
 <h3 id="which-credential-a-chat-turn-uses">Which credential a chat turn uses</h3>
