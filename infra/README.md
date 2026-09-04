@@ -13,6 +13,12 @@ Each module is self-contained and deploys:
 
 Post-deployment smoke tests run automatically via a `null_resource` provisioner after each `terraform apply`.
 
+Each stack sets both the schema-discovery target (`SchemaProvider__Provider`, `ConnectionStrings__DefaultConnection`)
+and the application's own persistence (`FABRICATE_DB_PROVIDER=postgres`, `FABRICATE_CONNECTION_STRING`) to the
+provisioned PostgreSQL, so accounts, API keys, sessions and LLM credentials survive restarts. Migrations are applied
+at startup. Add the `FABRICATE_LLM_*` variables and the LLM key secret to enable the agent chat — see
+[docs/how-to/self-hosting.md](../docs/how-to/self-hosting.md).
+
 For detailed per-cloud step-by-step guides see:
 
 - 📖 [AWS Setup Guide](aws/SETUP.md) — ECS Fargate · ALB · RDS · ECR · Secrets Manager

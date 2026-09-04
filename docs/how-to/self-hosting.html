@@ -32,6 +32,7 @@
 <tr><td><code>FABRICATE_CONNECTION_STRING</code></td><td>with <code>postgres</code></td><td>PostgreSQL connection string. Carries credentials — set it as a <strong>secret</strong>.</td></tr>
 <tr><td><code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code></td><td>recommended</td><td>Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances; see <a href="#key-ring">Key ring</a>.</td></tr>
 <tr><td><code>ASPNETCORE_URLS</code></td><td>no</td><td>Defaults to <code>http://+:8080</code> in the image. TLS is terminated by your platform.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACTS_PATH</code></td><td>no</td><td>Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart. Object storage is a tracked follow-up.</td></tr>
 </tbody>
 </table>
 <p>Pending EF Core migrations are applied automatically at startup, so a fresh database needs no manual step. Several instances starting at once apply the schema exactly once (EF Core's migration lock).</p>
@@ -53,6 +54,8 @@
 <tr><td><code>FABRICATE_LLM_TIMEOUT_SECONDS</code></td><td>no</td><td>Default 120. Set your platform's proxy timeout above this.</td></tr>
 <tr><td><code>FABRICATE_LLM_MAX_TOOL_ITERATIONS</code></td><td>no</td><td>Default 8. Caps the model/tool loop per turn.</td></tr>
 <tr><td><code>FABRICATE_LLM_HISTORY_WINDOW</code></td><td>no</td><td>Default 40 messages sent as context.</td></tr>
+<tr><td><code>FABRICATE_LLM_MAX_INPUT_TOKENS</code></td><td>no</td><td>Default 120000. Estimated input budget per request; oldest history is dropped to fit. <code>0</code> disables trimming.</td></tr>
+<tr><td><code>FABRICATE_LLM_MAX_RETRIES</code></td><td>no</td><td>Default 2. Retries of retryable provider failures (rate limit, transport, timeout, 5xx) with exponential backoff from 500 ms. Authentication and invalid-request failures are never retried.</td></tr>
 <tr><td><code>FABRICATE_LLM_ALLOWED_ENDPOINT_HOSTS</code></td><td>no</td><td>Hosts that workspace-supplied endpoints may target (suffix match). Empty = any public HTTPS host.</td></tr>
 <tr><td><code>FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS</code></td><td>no</td><td><code>true</code> permits <code>http://</code> and private/loopback endpoints — for air-gapped local runtimes only.</td></tr>
 </tbody>
@@ -88,8 +91,8 @@ curl -s http://localhost:8080/healthz</code></pre>
 <p>same variables as <code>.env.example</code>, with <code>FABRICATE_CONNECTION_STRING</code> from the plugin's connection URL.</p>
 <ul><li><strong>Cloudflare Containers + Neon</strong> — viable now that the API is stateless; documented only, no maintained pipeline.</li></ul>
 <p>Cloudflare <strong>Workers</strong> cannot run .NET; Cloudflare <strong>Pages</strong> is a good host for this <code>docs/</code> site.</p>
-<ul><li><strong>AWS / Azure / GCP with Terraform</strong> — the production-grade path under <code>infra/</code>. Set <code>FABRICATE_DB_PROVIDER=postgres</code></li></ul>
-<p>and the connection string secret so the provisioned database is actually used.</p>
+<ul><li><strong>AWS / Azure / GCP with Terraform</strong> — the production-grade path under <code>infra/</code>. The stacks set</li></ul>
+<p><code>FABRICATE_DB_PROVIDER=postgres</code> and <code>FABRICATE_CONNECTION_STRING</code> to the database they provision, so state is durable there too; add the <code>FABRICATE_LLM_*</code> variables and your key secret to enable chat.</p>
 <h2 id="egress-profile">Egress profile</h2>
 <p>A running instance makes outbound connections <strong>only</strong> to:</p>
 <table>

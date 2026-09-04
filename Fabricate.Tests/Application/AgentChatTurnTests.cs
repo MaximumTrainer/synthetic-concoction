@@ -19,6 +19,8 @@ public sealed class AgentChatTurnTests
     private readonly ToolRegistry _toolRegistry = new();
     private readonly ScriptedClient _client = new();
     private readonly LlmOptions _options = new() { MaxToolIterations = 3, HistoryWindow = 20 };
+    private readonly HeuristicTokenBudgetEstimator _estimator = new();
+    private readonly InMemoryLlmCredentialStore _policyStore = new();
     private readonly RecordingTool _echoTool = new("echo");
     private readonly AgentChatService _chat;
 
@@ -34,7 +36,33 @@ public sealed class AgentChatTurnTests
             new Dictionary<string, string>(), LlmCredentialSource.WorkspaceDefault);
 
         _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
-            new FixedResolver(credential), new FixedFactory(_client), _options);
+            new FixedResolver(credential), new FixedFactory(_client), _estimator, _policyStore, _options);
+    }
+
+    [Fact]
+    public async Task WorkspacePolicyAllowlist_RestrictsToolsOffered_AndBlocksExecution()
+    {
+        var (wsId, userId, session) = await CreateSessionAsync();
+        await _policyStore.SavePolicyAsync(new WorkspaceLlmPolicy(wsId, false, DateTimeOffset.UtcNow, ["echo"]));
+        _client.Enqueue(ToolCall("dangerous", "{}"));
+        _client.Enqueue(Text("done"));
+
+        var turn = await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "go"));
+
+        _client.Requests[0].Tools.Select(t => t.Name).Should().Equal(["echo"], "the persisted policy narrows the registry's tools");
+        turn.ToolInvocations.Should().ContainSingle().Which.Status.Should().Be(ToolInvocationStatus.Failed);
+    }
+
+    [Fact]
+    public async Task WorkspacePolicyWithEmptyAllowlist_OffersNoTools()
+    {
+        var (wsId, userId, session) = await CreateSessionAsync();
+        await _policyStore.SavePolicyAsync(new WorkspaceLlmPolicy(wsId, false, DateTimeOffset.UtcNow, []));
+        _client.Enqueue(Text("ok"));
+
+        await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "hi"));
+
+        _client.Requests[0].Tools.Should().BeEmpty();
     }
 
     private async Task<(Guid wsId, Guid userId, ChatSession session)> CreateSessionAsync(ChatMode mode = ChatMode.Autonomous)
@@ -129,10 +157,77 @@ public sealed class AgentChatTurnTests
         _client.Requests.Should().HaveCount(1, "the loop must not continue until approval");
         turn.AssistantMessage!.Content.Should().Contain("awaiting approval");
 
+        _client.Enqueue(Text("done"));
         var approved = await _chat.ApproveToolInvocationAsync(session.Id, pending.Id, userId);
 
-        approved.Status.Should().Be(ToolInvocationStatus.Succeeded);
+        approved.Invocation.Status.Should().Be(ToolInvocationStatus.Succeeded);
         _echoTool.Calls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ApprovingTheLastPendingCall_ResumesTheModelLoop_WithTheToolResult()
+    {
+        var (_, userId, session) = await CreateSessionAsync(ChatMode.ReviewRequired);
+        _client.Enqueue(ToolCall("echo", """{"v":7}"""));
+        var turn = await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "do it"));
+        _client.Enqueue(Text("The tool returned 7."));
+
+        var approval = await _chat.ApproveToolInvocationAsync(session.Id, turn.ToolInvocations[0].Id, userId);
+
+        approval.Invocation.Status.Should().Be(ToolInvocationStatus.Succeeded);
+        approval.Continuation.Should().NotBeNull("all pending calls are resolved, so the model gets the results");
+        approval.Continuation!.AssistantMessage!.Content.Should().Be("The tool returned 7.");
+        approval.Continuation.UserMessage.Content.Should().Be("do it");
+
+        _client.Requests.Should().HaveCount(2);
+        _client.Requests[1].Messages.Last().Role.Should().Be(LlmMessageRole.User);
+        _client.Requests[1].Messages.Last().Text.Should().Contain("\"echoed\"").And.Contain("7");
+
+        var history = await _chat.GetHistoryAsync(session.Id, userId);
+        history.Select(m => m.Role).Should().EndWith([MessageRole.Tool, MessageRole.Assistant]);
+    }
+
+    [Fact]
+    public async Task ApprovingOneOfSeveralPendingCalls_DoesNotResumeUntilAllAreResolved()
+    {
+        var (_, userId, session) = await CreateSessionAsync(ChatMode.ReviewRequired);
+        _client.Enqueue(new ChatCompletionResult(null,
+            [new LlmToolCall("c1", "echo", """{"v":1}"""), new LlmToolCall("c2", "echo", """{"v":2}""")],
+            LlmStopReason.ToolUse, new TokenUsage(1, 1), "claude-opus-5"));
+        var turn = await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "do both"));
+        _client.Enqueue(Text("both done"));
+
+        var first = await _chat.ApproveToolInvocationAsync(session.Id, turn.ToolInvocations[0].Id, userId);
+        first.Continuation.Should().BeNull("one call is still pending");
+        _client.Requests.Should().HaveCount(1);
+
+        var second = await _chat.ApproveToolInvocationAsync(session.Id, turn.ToolInvocations[1].Id, userId);
+        second.Continuation.Should().NotBeNull();
+        second.Continuation!.AssistantMessage!.Content.Should().Be("both done");
+    }
+
+    [Fact]
+    public async Task History_IsTrimmedToTheTokenBudget_DroppingOldestFirst_KeepingTheLatestUserMessage()
+    {
+        var (_, userId, session) = await CreateSessionAsync();
+        // ~4 chars per token: each 400-char message ≈ 100 tokens. Budget leaves room for roughly two of them plus the system prompt.
+        var filler = new string('x', 400);
+        for (var i = 0; i < 5; i++)
+        {
+            _client.Enqueue(Text($"reply {i} {filler}"));
+            await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, $"message {i} {filler}"));
+        }
+        _client.Requests.Clear();
+        _options.MaxInputTokens = 450;
+        _client.Enqueue(Text("final"));
+
+        await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "latest question"));
+
+        var sent = _client.Requests.Single().Messages;
+        sent.Last().Text.Should().Be("latest question", "the newest user message is never trimmed");
+        sent.Should().NotContain(m => m.Text!.StartsWith("message 0"), "oldest history is dropped first");
+        sent.Count.Should().BeLessThan(11);
+        _estimator.Estimate(_client.Requests.Single()).Should().BeLessThanOrEqualTo(450);
     }
 
     [Fact]
@@ -194,7 +289,7 @@ public sealed class AgentChatTurnTests
     {
         var (_, userId, session) = await CreateSessionAsync();
         var chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
-            new FixedResolver(null), new FixedFactory(_client), _options);
+            new FixedResolver(null), new FixedFactory(_client), _estimator, _policyStore, _options);
 
         var turn = await chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "hello"));
         turn.AssistantMessage!.Content.Should().Contain("No LLM credential is configured");

@@ -522,6 +522,9 @@ namespace Fabricate.Infrastructure.Persistence.Migrations
                     b.Property<bool>("AllowPlatformFallback")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AllowedTools")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("UpdatedAt")
                         .HasColumnType("INTEGER");
 

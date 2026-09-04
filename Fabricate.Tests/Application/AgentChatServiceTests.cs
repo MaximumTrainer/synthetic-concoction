@@ -26,7 +26,7 @@ public sealed class AgentChatServiceTests
         _instructionService = new InstructionVersionService(_workspaceService);
         _chatService = new AgentChatService(
             _sessionRepo, new NoOpToolRegistry(), _workspaceService, _instructionService,
-            new NoCredentialResolver(), new ThrowingClientFactory(), new LlmOptions());
+            new NoCredentialResolver(), new ThrowingClientFactory(), new HeuristicTokenBudgetEstimator(), new InMemoryLlmCredentialStore(), new LlmOptions());
     }
 
     private async Task<(Guid workspaceId, Guid adminUserId)> CreateWorkspaceAsync()

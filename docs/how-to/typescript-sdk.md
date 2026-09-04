@@ -190,30 +190,91 @@ const run = await client.pollRun(runId);
 
 ### Chat
 
-#### `createChatSession(workspaceId: string, title: string): Promise<ChatSession>`
+Chat is answered by the LLM the workspace is configured to use — a credential the workspace registered
+([bring your own key](byok-llm-credentials.md)) or, where allowed, the operator's platform credential. All chat
+methods take the `workspaceId` first.
+
+#### `createChatSession(workspaceId, name, { projectId?, mode? }): Promise<ChatSession>`
+
+`mode` is `"Guided"` (default), `"Autonomous"` or `"ReviewRequired"` (tool calls are parked until approved).
 
 ```typescript
-const session = await client.createChatSession(workspace.id, "Schema exploration");
+const session = await client.createChatSession(workspace.id, "Schema exploration", { mode: "ReviewRequired" });
 ```
 
-#### `sendMessage(sessionId: string, content: string): Promise<ChatMessage>`
+#### `sendMessage(workspaceId, sessionId, content): Promise<ChatTurnResult>`
+
+Runs the whole turn — model call, tool loop — and returns your message, the reply, every tool invocation, token
+usage and a stop reason. On a refusal, provider failure or missing credential, `assistantMessage` is a `System`
+notice and `stopReason` is `Refusal` / `Error` / `null`; no exception is thrown.
 
 ```typescript
-const reply = await client.sendMessage(session.id, "Show me the schema.");
-console.log(reply.content);
+const turn = await client.sendMessage(workspace.id, session.id, "Show me the schema.");
+console.log(turn.assistantMessage?.content, turn.usage.totalTokens);
+for (const call of turn.toolInvocations) console.log(call.toolName, call.status);
 ```
 
-#### `getChatHistory(sessionId: string): Promise<ChatMessage[]>`
+#### `streamMessage(workspaceId, sessionId, content): AsyncGenerator<ChatStreamEvent>`
+
+The same turn as server-sent events: `delta`, `tool_requested`, `tool_completed`, `notice`, then a terminal
+`completed` carrying the full `ChatTurnResult`.
 
 ```typescript
-const messages = await client.getChatHistory(session.id);
+for await (const evt of client.streamMessage(workspace.id, session.id, "Generate 50 rows per table.")) {
+  if (evt.event === "delta") process.stdout.write(evt.data.text);
+  if (evt.event === "completed") console.log("\nstop:", evt.data.stopReason);
+}
 ```
 
-#### `archiveChatSession(sessionId: string): Promise<void>`
+#### `listToolInvocations(workspaceId, sessionId): Promise<ToolInvocation[]>`
+
+#### `approveToolInvocation(workspaceId, sessionId, invocationId): Promise<ToolApprovalResult>`
+
+Runs a `Pending` call from a `ReviewRequired` session (Editor role or above). Once every parked call is decided the
+model loop resumes and the resulting turn is returned as `continuation`.
 
 ```typescript
-await client.archiveChatSession(session.id);
+const pending = turn.toolInvocations.filter((i) => i.status === "Pending");
+for (const call of pending) {
+  const { invocation, continuation } = await client.approveToolInvocation(workspace.id, session.id, call.id);
+  if (continuation) console.log(continuation.assistantMessage?.content);
+}
 ```
+
+#### `getChatHistory(workspaceId, sessionId, pageSize?): Promise<ChatMessage[]>`
+
+#### `setChatMode(workspaceId, sessionId, mode): Promise<ChatSession>`
+
+#### `archiveChatSession(workspaceId, sessionId): Promise<ChatSession>`
+
+---
+
+### LLM credentials (bring your own key)
+
+Every response is a redacted `LlmCredentialSummary` (fingerprint and last four characters — never the secret).
+Register, rotate, revoke and policy changes need the workspace Admin role; list and validate need any role.
+
+```typescript
+const credential = await client.registerLlmCredential(workspace.id, {
+  name: "team-anthropic",
+  provider: "Anthropic",
+  model: "claude-opus-5",
+  secret: process.env.ANTHROPIC_API_KEY!,
+  isDefault: true,
+});
+
+const check = await client.validateLlmCredential(workspace.id, credential.id);   // minimal provider probe
+await client.rotateLlmCredential(workspace.id, credential.id, "sk-ant-new…");
+const all = await client.listLlmCredentials(workspace.id);
+await client.revokeLlmCredential(workspace.id, credential.id);                   // soft; excluded immediately
+
+// Per-workspace policy: platform-credential fallback and which tools the model may be offered.
+await client.setWorkspaceLlmPolicy(workspace.id, { allowPlatformFallback: false, allowedTools: ["discover_schema"] });
+```
+
+An OpenAI-compatible endpoint (OpenAI, Azure OpenAI, vLLM, Ollama, gateways) uses `provider: "OpenAiCompatible"`
+with a public HTTPS `endpoint`; Bedrock and Vertex use `kind: "CloudIdentity"` with `nonSecretSettings`
+(`region` / `projectId`, `location`) and no secret.
 
 ---
 
@@ -281,12 +342,23 @@ import type {
   ApiKey,
   ApiKeyCreateResult,
   ChatMessage,
+  ChatMode,
   ChatSession,
+  ChatStreamEvent,
+  ChatTurnResult,
   FabricateClientOptions,
   DatasetRun,
+  LlmCredentialSummary,
+  LlmCredentialValidationResult,
+  LlmProvider,
   PaginatedResult,
   Project,
+  RegisterLlmCredentialRequest,
+  TokenUsage,
+  ToolApprovalResult,
+  ToolInvocation,
   Workspace,
+  WorkspaceLlmPolicy,
   Workflow,
   ComplianceProfile,
 } from "@fabricate/client";

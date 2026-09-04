@@ -50,6 +50,21 @@ public sealed class GenerateDataTool(ISyntheticDataOrchestrator orchestrator) : 
     public string Name => "generate_data";
     public string Description => "Generate synthetic data for the active schema. Accepts optional row counts and rule configuration.";
 
+    public string InputSchemaJson => """
+        {
+          "type": "object",
+          "properties": {
+            "rowCounts": {
+              "type": "object",
+              "description": "Rows to generate per table, keyed by qualified table name. Defaults to 10 per table.",
+              "additionalProperties": { "type": "integer", "minimum": 0 }
+            },
+            "seed": { "type": "integer", "description": "Deterministic seed; the same seed and schema always produce the same data. Defaults to 42." }
+          },
+          "additionalProperties": false
+        }
+        """;
+
     private static readonly JsonSerializerOptions _readOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<string> ExecuteAsync(

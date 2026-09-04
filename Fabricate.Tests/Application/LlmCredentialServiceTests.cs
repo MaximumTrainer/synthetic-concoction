@@ -210,6 +210,27 @@ public sealed class LlmCredentialServiceTests
         (await _service.GetPolicyAsync(wsId, viewerId)).AllowPlatformFallback.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task Policy_ToolAllowlist_IsPersisted_Normalised_AndPreservedWhenOmitted()
+    {
+        var (wsId, adminId, _, viewerId) = await CreateWorkspaceAsync();
+
+        (await _service.GetPolicyAsync(wsId, viewerId)).AllowedTools.Should().BeNull("no policy means every registered tool");
+
+        await _service.SetPolicyAsync(wsId, false, adminId, [" discover_schema ", "generate_data", "GENERATE_DATA", ""]);
+        (await _service.GetPolicyAsync(wsId, viewerId)).AllowedTools.Should().Equal("discover_schema", "generate_data");
+
+        await _service.SetPolicyAsync(wsId, true, adminId);
+        var after = await _service.GetPolicyAsync(wsId, viewerId);
+        after.AllowPlatformFallback.Should().BeTrue();
+        after.AllowedTools.Should().Equal(["discover_schema", "generate_data"], "omitting the list leaves it unchanged");
+
+        await _service.SetPolicyAsync(wsId, true, adminId, []);
+        (await _service.GetPolicyAsync(wsId, viewerId)).AllowedTools.Should().BeEmpty("an empty list means no tools");
+
+        _auditRepo.All.Last(e => e.Action == "llm_policy.updated").Details.Should().Contain("allowedTools=");
+    }
+
     private static void NoPlaintextIn(LlmCredentialSummary summary)
     {
         summary.ToString().Should().NotContain(Secret);

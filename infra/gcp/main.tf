@@ -156,6 +156,23 @@ resource "google_cloud_run_v2_service" "api" {
         value = "Host=${google_sql_database_instance.main.public_ip_address};Database=fabricate;Username=fabricate;Password=${var.db_password}"
       }
 
+      # Application persistence (accounts, API keys, sessions, credentials). Without these the API runs in-memory
+      # and loses state on every revision; migrations are applied at startup.
+      env {
+        name  = "FABRICATE_DB_PROVIDER"
+        value = "postgres"
+      }
+
+      env {
+        name  = "FABRICATE_CONNECTION_STRING"
+        value = "Host=${google_sql_database_instance.main.public_ip_address};Database=fabricate;Username=fabricate;Password=${var.db_password};SSL Mode=Require;Trust Server Certificate=true"
+      }
+
+      env {
+        name  = "FABRICATE_DATA_PROTECTION_KEYS_PATH"
+        value = "/app/keys"
+      }
+
       env {
         name = "FABRICATE__BootstrapApiKey"
         value_source {

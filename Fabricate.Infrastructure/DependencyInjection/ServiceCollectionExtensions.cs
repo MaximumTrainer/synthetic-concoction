@@ -128,9 +128,15 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IExporter, SqlExporter>();
         services.AddSingleton<IExporter, ParquetExporter>();
 
-        services.AddSingleton<IArtifactStore>(sp =>
+        // Generated artifacts go to FABRICATE_ARTIFACTS_PATH when set, else the OS temp directory. On hosted platforms
+        // the container filesystem is ephemeral either way; point this at a mounted volume if artifacts must outlive
+        // a restart (object storage is tracked as a follow-up on #61).
+        services.AddSingleton<IArtifactStore>(_ =>
         {
-            var baseDir = Path.Combine(Path.GetTempPath(), "fabricate-artifacts");
+            var configured = Environment.GetEnvironmentVariable("FABRICATE_ARTIFACTS_PATH");
+            var baseDir = string.IsNullOrWhiteSpace(configured)
+                ? Path.Combine(Path.GetTempPath(), "fabricate-artifacts")
+                : configured;
             return new FileSystemArtifactStore(baseDir);
         });
 
@@ -201,6 +207,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILlmCredentialProbe, ChatCompletionCredentialProbe>();
         services.AddSingleton<ILlmCredentialResolver, LlmCredentialResolver>();
         services.AddSingleton<ILlmCredentialService, LlmCredentialService>();
+        services.AddSingleton<ITokenBudgetEstimator, HeuristicTokenBudgetEstimator>();
 
         return services;
     }

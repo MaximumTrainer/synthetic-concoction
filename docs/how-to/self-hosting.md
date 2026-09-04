@@ -18,6 +18,7 @@ Everything is configured by environment variables, so the same image runs unchan
 | `FABRICATE_CONNECTION_STRING` | with `postgres` | PostgreSQL connection string. Carries credentials — set it as a **secret**. |
 | `FABRICATE_DATA_PROTECTION_KEYS_PATH` | recommended | Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances; see [Key ring](#key-ring). |
 | `ASPNETCORE_URLS` | no | Defaults to `http://+:8080` in the image. TLS is terminated by your platform. |
+| `FABRICATE_ARTIFACTS_PATH` | no | Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart. Object storage is a tracked follow-up. |
 
 Pending EF Core migrations are applied automatically at startup, so a fresh database needs no manual step. Several
 instances starting at once apply the schema exactly once (EF Core's migration lock).
@@ -43,6 +44,8 @@ offending variable.
 | `FABRICATE_LLM_TIMEOUT_SECONDS` | no | Default 120. Set your platform's proxy timeout above this. |
 | `FABRICATE_LLM_MAX_TOOL_ITERATIONS` | no | Default 8. Caps the model/tool loop per turn. |
 | `FABRICATE_LLM_HISTORY_WINDOW` | no | Default 40 messages sent as context. |
+| `FABRICATE_LLM_MAX_INPUT_TOKENS` | no | Default 120000. Estimated input budget per request; oldest history is dropped to fit. `0` disables trimming. |
+| `FABRICATE_LLM_MAX_RETRIES` | no | Default 2. Retries of retryable provider failures (rate limit, transport, timeout, 5xx) with exponential backoff from 500 ms. Authentication and invalid-request failures are never retried. |
 | `FABRICATE_LLM_ALLOWED_ENDPOINT_HOSTS` | no | Hosts that workspace-supplied endpoints may target (suffix match). Empty = any public HTTPS host. |
 | `FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS` | no | `true` permits `http://` and private/loopback endpoints — for air-gapped local runtimes only. |
 
@@ -127,8 +130,9 @@ Protection supports both.
   same variables as `.env.example`, with `FABRICATE_CONNECTION_STRING` from the plugin's connection URL.
 - **Cloudflare Containers + Neon** — viable now that the API is stateless; documented only, no maintained pipeline.
   Cloudflare **Workers** cannot run .NET; Cloudflare **Pages** is a good host for this `docs/` site.
-- **AWS / Azure / GCP with Terraform** — the production-grade path under `infra/`. Set `FABRICATE_DB_PROVIDER=postgres`
-  and the connection string secret so the provisioned database is actually used.
+- **AWS / Azure / GCP with Terraform** — the production-grade path under `infra/`. The stacks set
+  `FABRICATE_DB_PROVIDER=postgres` and `FABRICATE_CONNECTION_STRING` to the database they provision, so state is
+  durable there too; add the `FABRICATE_LLM_*` variables and your key secret to enable chat.
 
 ## Egress profile
 
