@@ -259,8 +259,14 @@ resource "aws_ecs_task_definition" "app" {
 
     environment = [
       { name = "ASPNETCORE_ENVIRONMENT", value = "Production" },
+      # Schema-discovery target (what Fabricate introspects).
       { name = "SchemaProvider__Provider", value = "PostgreSQL" },
-      { name = "ConnectionStrings__DefaultConnection", value = "Host=${aws_db_instance.postgres.address};Database=fabricate;Username=fabricate;Password=${var.db_password}" }
+      { name = "ConnectionStrings__DefaultConnection", value = "Host=${aws_db_instance.postgres.address};Database=fabricate;Username=fabricate;Password=${var.db_password}" },
+      # Application persistence (accounts, API keys, sessions, credentials). Without these the API runs in-memory
+      # and loses state on every task restart; migrations are applied at startup.
+      { name = "FABRICATE_DB_PROVIDER", value = "postgres" },
+      { name = "FABRICATE_CONNECTION_STRING", value = "Host=${aws_db_instance.postgres.address};Database=fabricate;Username=fabricate;Password=${var.db_password};SSL Mode=Require;Trust Server Certificate=true" },
+      { name = "FABRICATE_DATA_PROTECTION_KEYS_PATH", value = "/app/keys" }
     ]
 
     secrets = [{
