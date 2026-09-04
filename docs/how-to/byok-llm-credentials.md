@@ -48,6 +48,8 @@ Provider-specific shapes:
 | --- | --- | --- | --- | --- |
 | `Anthropic` | `ApiKey` | API key | optional base URL | — |
 | `OpenAiCompatible` | `ApiKey` | API key (may be empty for a keyless local runtime) | **required**, e.g. `https://api.openai.com/v1` | — |
+| `OpenAiCompatible` — **Azure OpenAI** | `ApiKey` | Azure OpenAI key (sent as `api-key`, which Azure requires) | `https://<resource>.openai.azure.com` (the `model` is used as the deployment name) or the full deployment URL with `?api-version=` | — |
+| `OpenAiCompatible` — **Gemini** | `ApiKey` | Google AI API key | `https://generativelanguage.googleapis.com/v1beta/openai` | — |
 | `AwsBedrock` | `CloudIdentity` | empty | — | `region` |
 | `GcpVertexAi` | `CloudIdentity` | empty | — | `projectId`, `location` |
 | `AzureFoundry` | `ApiKey` | Foundry key | resource endpoint | `resourceName` (optional; derived from the endpoint) |

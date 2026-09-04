@@ -53,8 +53,10 @@ Provider notes:
 
 - **anthropic** — the official Anthropic API. The adapter sends adaptive thinking and effort and never sends sampling
   parameters or `budget_tokens`, which current Claude models reject.
-- **openai-compatible** — one adapter for OpenAI, Azure OpenAI, vLLM, Ollama and gateways such as OpenRouter. A
-  keyless local runtime works with `FABRICATE_LLM_API_KEY_SECRET` unset.
+- **openai-compatible** — one adapter for OpenAI, Azure OpenAI, Gemini's OpenAI-compatible endpoint, vLLM, Ollama
+  and gateways such as OpenRouter. A keyless local runtime works with `FABRICATE_LLM_API_KEY_SECRET` unset. Azure
+  OpenAI is recognised by its host: the key is sent as the `api-key` header Azure requires, and a bare resource URL
+  is completed with `/openai/deployments/<model>/chat/completions?api-version=…` (the model id is the deployment name).
 - **bedrock / vertex / foundry** — Claude through your cloud account, authenticated by IAM / ADC / a Foundry key.
   Bedrock model ids take the `anthropic.` prefix (e.g. `anthropic.claude-opus-5`); Vertex uses the bare id.
 

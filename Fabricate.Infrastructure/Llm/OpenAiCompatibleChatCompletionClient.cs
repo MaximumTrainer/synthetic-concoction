@@ -19,20 +19,43 @@ public sealed class OpenAiCompatibleChatCompletionClient : IChatCompletionClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = false };
 
+    /// <summary>Azure OpenAI data-plane API version used when the endpoint is a bare resource root.</summary>
+    public const string DefaultAzureApiVersion = "2024-10-21";
+
     private readonly HttpClient _http;
-    private readonly Uri _endpoint;
+    private readonly string _baseUrl;
     private readonly string? _apiKey;
+    private readonly bool _isAzureOpenAi;
 
     public OpenAiCompatibleChatCompletionClient(HttpClient http, string baseUrl, string? apiKey)
     {
         _http = http;
         _apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey;
+        _baseUrl = baseUrl.Trim().TrimEnd('/');
 
-        var trimmed = baseUrl.TrimEnd('/');
-        _endpoint = new Uri(trimmed.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase) ? trimmed : trimmed + "/chat/completions");
+        // Azure OpenAI differs from every other OpenAI-compatible host in two ways: keys go in an `api-key` header
+        // (Bearer is reserved for Entra tokens), and the path names a deployment and requires an api-version.
+        var host = Uri.TryCreate(_baseUrl, UriKind.Absolute, out var uri) ? uri.Host : string.Empty;
+        _isAzureOpenAi = host.EndsWith(".openai.azure.com", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".cognitiveservices.azure.com", StringComparison.OrdinalIgnoreCase);
     }
 
-    public string ProviderId => "openai-compatible";
+    public string ProviderId => _isAzureOpenAi ? "azure-openai" : "openai-compatible";
+
+    /// <summary>
+    /// An endpoint that already names <c>/chat/completions</c> (query string included) is used verbatim. Otherwise the
+    /// route is appended — for Azure, the deployment route, with the model id doubling as the deployment name.
+    /// </summary>
+    private Uri ResolveEndpoint(string model)
+    {
+        if (_baseUrl.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            return new Uri(_baseUrl);
+
+        if (_isAzureOpenAi)
+            return new Uri($"{_baseUrl}/openai/deployments/{Uri.EscapeDataString(model)}/chat/completions?api-version={DefaultAzureApiVersion}");
+
+        return new Uri(_baseUrl + "/chat/completions");
+    }
 
     public ModelCapabilities Capabilities { get; } = new(
         SupportsSampling: true,
@@ -157,12 +180,17 @@ public sealed class OpenAiCompatibleChatCompletionClient : IChatCompletionClient
     private async Task<HttpResponseMessage> SendAsync(ChatCompletionRequest request, bool stream, CancellationToken cancellationToken)
     {
         var body = BuildBody(request, stream);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _endpoint)
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, ResolveEndpoint(request.Model))
         {
             Content = new StringContent(body.ToJsonString(JsonOptions), Encoding.UTF8, "application/json"),
         };
         if (_apiKey is not null)
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        {
+            if (_isAzureOpenAi)
+                httpRequest.Headers.TryAddWithoutValidation("api-key", _apiKey);
+            else
+                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        }
         if (stream)
             httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 

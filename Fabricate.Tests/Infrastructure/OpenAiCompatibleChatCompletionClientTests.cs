@@ -61,6 +61,50 @@ public sealed class OpenAiCompatibleChatCompletionClientTests
         result.Usage.Should().Be(TokenUsage.Zero, "usage is optional on some gateways");
     }
 
+    [Fact]
+    public async Task AzureOpenAi_UsesTheApiKeyHeader_AndKeepsTheDeploymentUrlAndApiVersion()
+    {
+        var handler = new CannedHandler(_ => Json(HttpStatusCode.OK, """{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"""));
+        var client = new OpenAiCompatibleChatCompletionClient(new HttpClient(handler),
+            "https://myres.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-21", "azure-key");
+
+        await client.CompleteAsync(Request());
+
+        var sent = handler.LastRequest!;
+        sent.RequestUri!.ToString().Should().Be("https://myres.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-21",
+            "an explicit chat-completions URL, including its query string, is used verbatim");
+        sent.Headers.Authorization.Should().BeNull("Azure OpenAI rejects Bearer for API keys");
+        sent.Headers.TryGetValues("api-key", out var keys).Should().BeTrue();
+        keys!.Single().Should().Be("azure-key");
+    }
+
+    [Fact]
+    public async Task AzureOpenAi_ResourceRootEndpoint_IsCompletedWithTheDeploymentPath()
+    {
+        var handler = new CannedHandler(_ => Json(HttpStatusCode.OK, """{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"""));
+        var client = new OpenAiCompatibleChatCompletionClient(new HttpClient(handler), "https://myres.openai.azure.com", "azure-key");
+
+        await client.CompleteAsync(Request() with { Model = "gpt-4o" });
+
+        handler.LastRequest!.RequestUri!.ToString().Should().Be(
+            $"https://myres.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version={OpenAiCompatibleChatCompletionClient.DefaultAzureApiVersion}",
+            "the model id doubles as the Azure deployment name");
+        handler.LastRequest.Headers.TryGetValues("api-key", out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GeminiOpenAiCompatibleEndpoint_UsesBearerAuth()
+    {
+        var handler = new CannedHandler(_ => Json(HttpStatusCode.OK, """{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"""));
+        var client = new OpenAiCompatibleChatCompletionClient(new HttpClient(handler), "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-key");
+
+        await client.CompleteAsync(Request() with { Model = "gemini-2.5-pro" });
+
+        handler.LastRequest!.RequestUri!.ToString().Should().Be("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+        handler.LastRequest.Headers.Authorization!.Parameter.Should().Be("gemini-key");
+        handler.LastRequest.Headers.Contains("api-key").Should().BeFalse();
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized, LlmFailureKind.Authentication)]
     [InlineData(HttpStatusCode.TooManyRequests, LlmFailureKind.RateLimited)]
