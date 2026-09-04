@@ -28,16 +28,25 @@ public sealed class SqlExporter : IExporter
             var sb = new StringBuilder();
             var headers = table.Rows[0].Keys.OrderBy(static h => h, StringComparer.Ordinal).ToArray();
             var columnList = string.Join(", ", headers.Select(h => $"\"{h}\""));
+            var qualifiedName = QuoteQualifiedName(table.Table);
 
             foreach (var row in table.Rows)
             {
                 var values = string.Join(", ", headers.Select(h => FormatValue(row.TryGetValue(h, out var v) ? v : null)));
-                sb.AppendLine($"INSERT INTO \"{table.Table}\" ({columnList}) VALUES ({values});");
+                sb.AppendLine($"INSERT INTO {qualifiedName} ({columnList}) VALUES ({values});");
             }
 
             await File.WriteAllTextAsync(filePath, sb.ToString(), Encoding.UTF8, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Quotes each part of a qualified name separately: <c>main.users</c> becomes <c>"main"."users"</c>.
+    /// Quoting the whole string produced <c>"main.users"</c>, which every engine reads as a single identifier
+    /// containing a dot, so the exported SQL could not be applied to the database it was generated from (#81).
+    /// </summary>
+    private static string QuoteQualifiedName(string qualifiedName)
+        => string.Join(".", qualifiedName.Split('.').Select(part => $"\"{part.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
 
     private static string FormatValue(object? value)
     {

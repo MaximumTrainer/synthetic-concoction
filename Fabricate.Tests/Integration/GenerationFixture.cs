@@ -93,26 +93,28 @@ internal static class GenerationFixture
         """;
 
     public static string PostgresDdl => """
-        CREATE TABLE users (
+        CREATE SCHEMA IF NOT EXISTS main;
+        SET search_path TO main;
+        CREATE TABLE main.users (
           id BIGINT PRIMARY KEY,
           email TEXT NOT NULL UNIQUE,
           display_name TEXT NOT NULL,
           created_at TEXT NOT NULL,
           is_active BOOLEAN NOT NULL,
           balance DOUBLE PRECISION NULL,
-          manager_id BIGINT NULL REFERENCES users(id)
+          manager_id BIGINT NULL REFERENCES main.users(id)
         );
-        CREATE TABLE orders (
+        CREATE TABLE main.orders (
           id BIGINT PRIMARY KEY,
-          user_id BIGINT NOT NULL REFERENCES users(id),
+          user_id BIGINT NOT NULL REFERENCES main.users(id),
           reference TEXT NOT NULL UNIQUE,
           placed_on TEXT NOT NULL,
           total DOUBLE PRECISION NOT NULL,
           notes TEXT NULL
         );
-        CREATE TABLE order_items (
+        CREATE TABLE main.order_items (
           id BIGINT PRIMARY KEY,
-          order_id BIGINT NOT NULL REFERENCES orders(id),
+          order_id BIGINT NOT NULL REFERENCES main.orders(id),
           sku TEXT NOT NULL,
           quantity BIGINT NOT NULL,
           unit_price DOUBLE PRECISION NOT NULL,
