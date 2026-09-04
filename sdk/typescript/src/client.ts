@@ -4,12 +4,22 @@ import type {
   ApiKey,
   ApiKeyCreateResult,
   ChatMessage,
+  ChatMode,
   ChatSession,
+  ChatStreamEvent,
+  ChatTurnResult,
   FabricateClientOptions,
   DatasetRun,
+  LlmCredentialSummary,
+  LlmCredentialValidationResult,
   PaginatedResult,
   Project,
+  RegisterLlmCredentialRequest,
+  SetWorkspaceLlmPolicyRequest,
+  ToolApprovalResult,
+  ToolInvocation,
   Workspace,
+  WorkspaceLlmPolicy,
   Workflow,
 } from "./types.js";
 
@@ -35,7 +45,7 @@ export class FabricateClient {
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
-  // ─── Accounts ───────────────────────────────────────────────────────────────
+  // ─── Accounts ────────────────────────────────────────────────────────────────
 
   async createAccount(name: string): Promise<Account> {
     return this.post<Account>("/accounts", { name });
@@ -52,15 +62,15 @@ export class FabricateClient {
   async inviteUser(
     accountId: string,
     email: string,
-    expiryHours = 48
-  ): Promise<void> {
-    await this.post(`/accounts/${accountId}/invitations`, {
-      email,
-      expiryHours,
-    });
+    expiresInHours = 72
+  ): Promise<{ invitationId: string; token: string }> {
+    return this.post<{ invitationId: string; token: string }>(
+      `/accounts/${accountId}/invitations`,
+      { email, expiresInHours }
+    );
   }
 
-  // ─── Workspaces ─────────────────────────────────────────────────────────────
+  // ─── Workspaces ──────────────────────────────────────────────────────────────
 
   async createWorkspace(
     accountId: string,
@@ -73,7 +83,7 @@ export class FabricateClient {
     return this.get<Workspace>(`/workspaces/${workspaceId}`);
   }
 
-  // ─── Projects ───────────────────────────────────────────────────────────────
+  // ─── Projects ────────────────────────────────────────────────────────────────
 
   async createProject(
     workspaceId: string,
@@ -94,15 +104,14 @@ export class FabricateClient {
     await this.post(`/projects/${projectId}/archive`, {});
   }
 
-  // ─── Dataset Runs ────────────────────────────────────────────────────────────
+  // ─── Runs ────────────────────────────────────────────────────────────────────
 
   async listRuns(
-    projectId: string,
     page = 1,
     pageSize = 20
   ): Promise<PaginatedResult<DatasetRun>> {
     return this.get<PaginatedResult<DatasetRun>>(
-      `/runs?projectId=${projectId}&page=${page}&pageSize=${pageSize}`
+      `/runs?page=${page}&pageSize=${pageSize}`
     );
   }
 
@@ -115,16 +124,15 @@ export class FabricateClient {
   }
 
   /**
-   * Poll a run until it reaches a terminal state (Completed, Failed, Cancelled).
-   * Rejects if the run fails or polling times out.
+   * Polls a run until it reaches a terminal state.
+   * Throws FabricateError if the run fails or is cancelled.
    */
   async pollRun(
     runId: string,
-    options: { intervalMs?: number; timeoutMs?: number } = {}
+    intervalMs = 2000,
+    timeoutMs = 300_000
   ): Promise<DatasetRun> {
-    const { intervalMs = 2000, timeoutMs = 120_000 } = options;
     const deadline = Date.now() + timeoutMs;
-
     while (Date.now() < deadline) {
       const run = await this.getRun(runId);
       if (run.status === "Completed") return run;
@@ -154,26 +162,164 @@ export class FabricateClient {
 
   async createChatSession(
     workspaceId: string,
-    title: string
+    name: string,
+    options: { projectId?: string; mode?: ChatMode } = {}
   ): Promise<ChatSession> {
-    return this.post<ChatSession>("/chat/sessions", { workspaceId, title });
-  }
-
-  async sendMessage(
-    sessionId: string,
-    content: string
-  ): Promise<ChatMessage> {
-    return this.post<ChatMessage>(`/chat/sessions/${sessionId}/messages`, {
-      content,
+    return this.post<ChatSession>(`/workspaces/${workspaceId}/chat/sessions`, {
+      name,
+      projectId: options.projectId ?? null,
+      mode: options.mode ?? "Guided",
     });
   }
 
-  async getChatHistory(sessionId: string): Promise<ChatMessage[]> {
-    return this.get<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`);
+  /** Runs the whole turn (model call and tool loop) and returns it once complete. */
+  async sendMessage(
+    workspaceId: string,
+    sessionId: string,
+    content: string
+  ): Promise<ChatTurnResult> {
+    return this.post<ChatTurnResult>(
+      `/workspaces/${workspaceId}/chat/sessions/${sessionId}/messages`,
+      { content }
+    );
   }
 
-  async archiveChatSession(sessionId: string): Promise<void> {
-    await this.post(`/chat/sessions/${sessionId}/archive`, {});
+  /**
+   * Same turn as `sendMessage`, yielded incrementally as server-sent events. The last event is always
+   * `completed`, carrying the full `ChatTurnResult`.
+   */
+  async *streamMessage(
+    workspaceId: string,
+    sessionId: string,
+    content: string
+  ): AsyncGenerator<ChatStreamEvent, void, undefined> {
+    const res = await this.fetchFn(
+      `${this.baseUrl}/workspaces/${workspaceId}/chat/sessions/${sessionId}/messages/stream`,
+      {
+        method: "POST",
+        headers: { ...this.headers(), "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ content }),
+      }
+    );
+
+    if (!res.ok) {
+      await this.handleResponse<unknown>(res);
+      return;
+    }
+    if (!res.body) {
+      throw new FabricateError("Streaming response has no body", res.status);
+    }
+
+    for await (const event of parseSse(res.body)) {
+      yield event as ChatStreamEvent;
+      if (event.event === "completed") return;
+    }
+  }
+
+  async getChatHistory(
+    workspaceId: string,
+    sessionId: string,
+    pageSize = 50
+  ): Promise<ChatMessage[]> {
+    return this.get<ChatMessage[]>(
+      `/workspaces/${workspaceId}/chat/sessions/${sessionId}/messages?pageSize=${pageSize}`
+    );
+  }
+
+  async listToolInvocations(
+    workspaceId: string,
+    sessionId: string
+  ): Promise<ToolInvocation[]> {
+    return this.get<ToolInvocation[]>(
+      `/workspaces/${workspaceId}/chat/sessions/${sessionId}/tool-invocations`
+    );
+  }
+
+  /** Runs a `Pending` tool call from a `ReviewRequired` session. Requires the workspace Editor role or above. */
+  async approveToolInvocation(
+    workspaceId: string,
+    sessionId: string,
+    invocationId: string
+  ): Promise<ToolApprovalResult> {
+    return this.post<ToolApprovalResult>(
+      `/workspaces/${workspaceId}/chat/sessions/${sessionId}/tool-invocations/${invocationId}/approve`,
+      {}
+    );
+  }
+
+  async setChatMode(
+    workspaceId: string,
+    sessionId: string,
+    mode: ChatMode
+  ): Promise<ChatSession> {
+    return this.patch<ChatSession>(
+      `/workspaces/${workspaceId}/chat/sessions/${sessionId}/mode`,
+      { mode }
+    );
+  }
+
+  async archiveChatSession(workspaceId: string, sessionId: string): Promise<ChatSession> {
+    return this.post<ChatSession>(
+      `/workspaces/${workspaceId}/chat/sessions/${sessionId}/archive`,
+      {}
+    );
+  }
+
+  // ─── LLM credentials (bring your own key) ────────────────────────────────────
+
+  /** Registers a workspace LLM credential. The secret is sent once; every response is a redacted summary. */
+  async registerLlmCredential(
+    workspaceId: string,
+    request: RegisterLlmCredentialRequest
+  ): Promise<LlmCredentialSummary> {
+    return this.post<LlmCredentialSummary>(
+      `/workspaces/${workspaceId}/llm-credentials`,
+      request
+    );
+  }
+
+  async listLlmCredentials(workspaceId: string): Promise<LlmCredentialSummary[]> {
+    return this.get<LlmCredentialSummary[]>(`/workspaces/${workspaceId}/llm-credentials`);
+  }
+
+  async rotateLlmCredential(
+    workspaceId: string,
+    credentialId: string,
+    secret: string
+  ): Promise<LlmCredentialSummary> {
+    return this.post<LlmCredentialSummary>(
+      `/workspaces/${workspaceId}/llm-credentials/${credentialId}/rotate`,
+      { secret }
+    );
+  }
+
+  /** Makes a minimal provider call to prove the credential works. Rate-limited server-side. */
+  async validateLlmCredential(
+    workspaceId: string,
+    credentialId: string
+  ): Promise<LlmCredentialValidationResult> {
+    return this.post<LlmCredentialValidationResult>(
+      `/workspaces/${workspaceId}/llm-credentials/${credentialId}/validate`,
+      {}
+    );
+  }
+
+  async revokeLlmCredential(workspaceId: string, credentialId: string): Promise<void> {
+    await this.delete(`/workspaces/${workspaceId}/llm-credentials/${credentialId}`);
+  }
+
+  async getWorkspaceLlmPolicy(workspaceId: string): Promise<WorkspaceLlmPolicy> {
+    return this.get<WorkspaceLlmPolicy>(`/workspaces/${workspaceId}/llm-credentials/policy`);
+  }
+
+  async setWorkspaceLlmPolicy(
+    workspaceId: string,
+    request: SetWorkspaceLlmPolicyRequest
+  ): Promise<WorkspaceLlmPolicy> {
+    return this.put<WorkspaceLlmPolicy>(
+      `/workspaces/${workspaceId}/llm-credentials/policy`,
+      request
+    );
   }
 
   // ─── API Keys ─────────────────────────────────────────────────────────────────
@@ -210,9 +356,29 @@ export class FabricateClient {
     return this.handleResponse<T>(res);
   }
 
-  private async post<T>(path: string, body: unknown): Promise<T> {
+  private post<T>(path: string, body: unknown): Promise<T> {
+    return this.send<T>("POST", path, body);
+  }
+
+  private put<T>(path: string, body: unknown): Promise<T> {
+    return this.send<T>("PUT", path, body);
+  }
+
+  private patch<T>(path: string, body: unknown): Promise<T> {
+    return this.send<T>("PATCH", path, body);
+  }
+
+  private async delete(path: string): Promise<void> {
     const res = await this.fetchFn(`${this.baseUrl}${path}`, {
-      method: "POST",
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    await this.handleResponse<unknown>(res);
+  }
+
+  private async send<T>(method: string, path: string, body: unknown): Promise<T> {
+    const res = await this.fetchFn(`${this.baseUrl}${path}`, {
+      method,
       headers: { ...this.headers(), "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -245,6 +411,55 @@ export class FabricateClient {
 
     if (!text) return undefined as unknown as T;
     return JSON.parse(text) as T;
+  }
+}
+
+/** Minimal SSE parser: yields one `{ event, data }` per blank-line-terminated block; `data` is parsed as JSON. */
+export async function* parseSse(
+  body: ReadableStream<Uint8Array>
+): AsyncGenerator<{ event: string; data: unknown }, void, undefined> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      // Normalise CRLF so block boundaries are always "\n\n". A trailing "\r" cut off by the chunk boundary is
+      // completed by the next chunk's "\n" and normalised on the following pass.
+      buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+
+      let boundary: number;
+      while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const parsed = parseBlock(block);
+        if (parsed) yield parsed;
+      }
+    }
+
+    const tail = parseBlock(buffer);
+    if (tail) yield tail;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseBlock(block: string): { event: string; data: unknown } | null {
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const rawLine of block.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (line.startsWith("event:")) event = line.slice("event:".length).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice("data:".length).trimStart());
+  }
+  if (dataLines.length === 0) return null;
+  const raw = dataLines.join("\n");
+  try {
+    return { event, data: JSON.parse(raw) };
+  } catch {
+    return { event, data: raw };
   }
 }
 

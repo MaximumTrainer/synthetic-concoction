@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TypeScript SDK — Fabricate</title>
+<title>TypeScript SDK (`@fabricate/client`) — Fabricate</title>
 <style></style>
 </head>
 <body>
@@ -14,179 +14,227 @@
     <li><a href="compliance-profiles.html">Compliance</a></li>
     <li><a href="rest-api.html">API</a></li>
     <li><a href="typescript-sdk.html">TypeScript SDK</a></li>
+    <li><a href="self-hosting.html">Self-hosting</a></li>
     <li><a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></li>
   </ul>
 </nav>
 <div class="page">
-<h1>TypeScript SDK</h1>
-<p>The <code>@fabricate/client</code> npm package provides a fully-typed client for the Fabricate REST API. Ships as CJS + ESM + TypeScript declaration files.</p>
-
-<h2 id="install">Installation</h2>
-<pre><code>npm install @fabricate/client</code></pre>
-<p>Or build from source:</p>
-<pre><code>cd sdk/typescript
+<h1>TypeScript SDK (<code>@fabricate/client</code>)</h1>
+<p>The <code>@fabricate/client</code> npm package provides a typed client for the Fabricate REST API. It ships as CJS + ESM + TypeScript declaration files (<code>.d.ts</code>).</p>
+<h2 id="installation">Installation</h2>
+<pre><code class="language-bash">npm install @fabricate/client</code></pre>
+<p>Or from the local source:</p>
+<pre><code class="language-bash">cd sdk/typescript
 npm install
 npm run build</code></pre>
-
-<h2 id="quickstart">Quick Start</h2>
-<pre><code>import { FabricateClient, FabricateError } from "@fabricate/client";
+<p>The built package is in <code>sdk/typescript/dist/</code>.</p>
+<h2 id="quick-start">Quick Start</h2>
+<pre><code class="language-typescript">import { FabricateClient, FabricateError } from &quot;@fabricate/client&quot;;
 
 const client = new FabricateClient({
-  baseUrl: "http://localhost:5000",
-  apiKey:  "cnc_yoursecrethere",
+  baseUrl: &quot;http://localhost:5000&quot;,
+  apiKey: &quot;cnc_yoursecrethere&quot;,
 });
 
-const account   = await client.createAccount("Acme Corp");
-const workspace = await client.createWorkspace(account.id, "Production Clone");
-const project   = await client.createProject(workspace.id, "Orders Dataset");</code></pre>
+// Create an account
+const account = await client.createAccount(&quot;Acme Corp&quot;);
+console.log(account.id);
 
-<h2 id="constructor">Constructor Options</h2>
-<pre><code>interface FabricateClientOptions {
+// Create a workspace
+const workspace = await client.createWorkspace(account.id, &quot;Production Clone&quot;);
+
+// Create a project
+const project = await client.createProject(workspace.id, &quot;Orders Dataset&quot;);</code></pre>
+<h2 id="client-constructor-options">Client Constructor Options</h2>
+<pre><code class="language-typescript">interface FabricateClientOptions {
   /** Base URL of the Fabricate API */
   baseUrl: string;
-  /** API key sent as X-Api-Key header */
+  /** API key (sent as X-Api-Key header) */
   apiKey: string;
-  /** Optional custom fetch — defaults to globalThis.fetch */
+  /** Optional custom fetch implementation — defaults to globalThis.fetch */
   fetch?: typeof globalThis.fetch;
 }</code></pre>
-
-<h2 id="accounts">Accounts</h2>
-<h4>createAccount(name)</h4>
-<pre><code>const account = await client.createAccount("Acme Corp");
-// { id: "3fa85f64-...", name: "Acme Corp", createdAt: "2024-06-01T10:00:00Z" }</code></pre>
-
-<h4>getAccount(accountId)</h4>
-<pre><code>const account = await client.getAccount("3fa85f64-...");</code></pre>
-
-<h4>listMembers(accountId)</h4>
-<pre><code>const members = await client.listMembers(account.id);
-// [{ accountId, userId, role: "Owner"|"Member", joinedAt }]</code></pre>
-
-<h4>inviteUser(accountId, email, expiryHours?)</h4>
-<pre><code>await client.inviteUser(account.id, "bob@example.com", 48);</code></pre>
-
-<h2 id="workspaces">Workspaces</h2>
-<h4>createWorkspace(accountId, name)</h4>
-<pre><code>const workspace = await client.createWorkspace(account.id, "Dev Sandbox");</code></pre>
-
-<h4>getWorkspace(workspaceId)</h4>
-<pre><code>const workspace = await client.getWorkspace("9a3b2c1d-...");</code></pre>
-
-<h2 id="projects">Projects</h2>
-<h4>createProject(workspaceId, name)</h4>
-<pre><code>const project = await client.createProject(workspace.id, "Orders Dataset");</code></pre>
-
-<h4>listProjects(workspaceId)</h4>
-<pre><code>const projects = await client.listProjects(workspace.id);</code></pre>
-
-<h4>getProject(projectId)</h4>
-<pre><code>const project = await client.getProject("proj-001");</code></pre>
-
-<h4>archiveProject(projectId)</h4>
-<pre><code>await client.archiveProject("proj-001"); // soft-delete</code></pre>
-
-<h2 id="runs">Dataset Runs</h2>
-<h4>listRuns(projectId, page?, pageSize?)</h4>
-<pre><code>const page = await client.listRuns(project.id, 1, 20);
-// { items: [...], totalCount: N, page: 1, pageSize: 20 }</code></pre>
-
-<h4>getRun(runId)</h4>
-<pre><code>const run = await client.getRun("run-abc123");
-// status: "Queued"|"Running"|"Completed"|"Failed"|"Cancelled"</code></pre>
-
-<h4>cancelRun(runId)</h4>
-<pre><code>await client.cancelRun("run-abc123");</code></pre>
-
-<h4>pollRun(runId, options?)</h4>
-<p>Polls until terminal state. Throws <code>FabricateError</code> on failure, cancellation, or timeout.</p>
-<pre><code>const { runId } = await client.runWorkflow(workflow.id);
-const completed = await client.pollRun(runId, {
-  intervalMs: 3000,    // default 2000
-  timeoutMs:  300_000, // default 120000
+<h2 id="methods">Methods</h2>
+<h3 id="accounts">Accounts</h3>
+<h4 id="createaccount-name-string-promise-account"><code>createAccount(name: string): Promise&lt;Account&gt;</code></h4>
+<pre><code class="language-typescript">const account = await client.createAccount(&quot;Acme Corp&quot;);
+// { id: &quot;3fa85f64-...&quot;, name: &quot;Acme Corp&quot;, createdAt: &quot;2024-06-01T10:00:00Z&quot; }</code></pre>
+<h4 id="getaccount-accountid-string-promise-account"><code>getAccount(accountId: string): Promise&lt;Account&gt;</code></h4>
+<pre><code class="language-typescript">const account = await client.getAccount(&quot;3fa85f64-...&quot;);</code></pre>
+<h4 id="listmembers-accountid-string-promise-accountmembership"><code>listMembers(accountId: string): Promise&lt;AccountMembership[]&gt;</code></h4>
+<pre><code class="language-typescript">const members = await client.listMembers(&quot;3fa85f64-...&quot;);
+// [{ accountId: &quot;...&quot;, userId: &quot;...&quot;, role: &quot;Owner&quot;, joinedAt: &quot;...&quot; }]</code></pre>
+<h4 id="inviteuser-accountid-string-email-string-expiryhours-number-promise-void"><code>inviteUser(accountId: string, email: string, expiryHours?: number): Promise&lt;void&gt;</code></h4>
+<pre><code class="language-typescript">await client.inviteUser(&quot;3fa85f64-...&quot;, &quot;bob@example.com&quot;, 48);</code></pre>
+<h3 id="workspaces">Workspaces</h3>
+<h4 id="createworkspace-accountid-string-name-string-promise-workspace"><code>createWorkspace(accountId: string, name: string): Promise&lt;Workspace&gt;</code></h4>
+<pre><code class="language-typescript">const workspace = await client.createWorkspace(account.id, &quot;Dev Sandbox&quot;);</code></pre>
+<h4 id="getworkspace-workspaceid-string-promise-workspace"><code>getWorkspace(workspaceId: string): Promise&lt;Workspace&gt;</code></h4>
+<pre><code class="language-typescript">const workspace = await client.getWorkspace(&quot;9a3b2c1d-...&quot;);</code></pre>
+<h3 id="projects">Projects</h3>
+<h4 id="createproject-workspaceid-string-name-string-promise-project"><code>createProject(workspaceId: string, name: string): Promise&lt;Project&gt;</code></h4>
+<pre><code class="language-typescript">const project = await client.createProject(workspace.id, &quot;Orders Dataset&quot;);</code></pre>
+<h4 id="listprojects-workspaceid-string-promise-project"><code>listProjects(workspaceId: string): Promise&lt;Project[]&gt;</code></h4>
+<pre><code class="language-typescript">const projects = await client.listProjects(workspace.id);</code></pre>
+<h4 id="getproject-projectid-string-promise-project"><code>getProject(projectId: string): Promise&lt;Project&gt;</code></h4>
+<pre><code class="language-typescript">const project = await client.getProject(&quot;proj-001&quot;);</code></pre>
+<h4 id="archiveproject-projectid-string-promise-void"><code>archiveProject(projectId: string): Promise&lt;void&gt;</code></h4>
+<pre><code class="language-typescript">await client.archiveProject(&quot;proj-001&quot;);</code></pre>
+<h3 id="dataset-runs">Dataset Runs</h3>
+<h4 id="listruns-projectid-string-page-number-pagesize-number-promise-paginatedresult-datasetrun"><code>listRuns(projectId: string, page?: number, pageSize?: number): Promise&lt;PaginatedResult&lt;DatasetRun&gt;&gt;</code></h4>
+<pre><code class="language-typescript">const page = await client.listRuns(project.id, 1, 20);
+console.log(page.items.length, page.totalCount);</code></pre>
+<h4 id="getrun-runid-string-promise-datasetrun"><code>getRun(runId: string): Promise&lt;DatasetRun&gt;</code></h4>
+<pre><code class="language-typescript">const run = await client.getRun(&quot;run-abc123&quot;);
+console.log(run.status); // &quot;Queued&quot; | &quot;Running&quot; | &quot;Completed&quot; | &quot;Failed&quot; | &quot;Cancelled&quot;</code></pre>
+<h4 id="cancelrun-runid-string-promise-void"><code>cancelRun(runId: string): Promise&lt;void&gt;</code></h4>
+<pre><code class="language-typescript">await client.cancelRun(&quot;run-abc123&quot;);</code></pre>
+<h4 id="pollrun-runid-string-options-intervalms-number-timeoutms-number-promise-datasetrun"><code>pollRun(runId: string, options?: { intervalMs?: number; timeoutMs?: number }): Promise&lt;DatasetRun&gt;</code></h4>
+<p>Polls a run at <code>intervalMs</code> (default 2 000ms) until it reaches a terminal state (<code>Completed</code>, <code>Failed</code>, <code>Cancelled</code>).</p>
+<ul><li>Throws <code>FabricateError</code> if the run fails or is cancelled.</li><li>Throws <code>FabricateError</code> if polling times out (default <code>timeoutMs = 120 000ms</code>).</li></ul>
+<pre><code class="language-typescript">const workflowResult = await client.runWorkflow(workflowId);
+const completedRun = await client.pollRun(workflowResult.runId, {
+  intervalMs: 3000,
+  timeoutMs: 300_000,
 });
-console.log("Completed at:", completed.completedAt);</code></pre>
-
-<h2 id="workflows">Workflows</h2>
-<h4>createWorkflow(workspaceId, name, steps)</h4>
-<pre><code>const workflow = await client.createWorkflow(workspace.id, "Nightly Refresh", [
-  { type: "generate", rows: 500 },
-  { type: "export",   format: "sql" },
+console.log(`Run completed at ${completedRun.completedAt}`);</code></pre>
+<h3 id="workflows">Workflows</h3>
+<h4 id="createworkflow-workspaceid-string-name-string-steps-unknown-promise-workflow"><code>createWorkflow(workspaceId: string, name: string, steps: unknown[]): Promise&lt;Workflow&gt;</code></h4>
+<pre><code class="language-typescript">const workflow = await client.createWorkflow(workspace.id, &quot;Nightly Refresh&quot;, [
+  { type: &quot;generate&quot;, rows: 500 },
+  { type: &quot;export&quot;, format: &quot;sql&quot; },
 ]);</code></pre>
-
-<h4>runWorkflow(workflowId)</h4>
-<pre><code>const { runId } = await client.runWorkflow(workflow.id);
+<h4 id="runworkflow-workflowid-string-promise-runid-string"><code>runWorkflow(workflowId: string): Promise&lt;{ runId: string }&gt;</code></h4>
+<pre><code class="language-typescript">const { runId } = await client.runWorkflow(workflow.id);
 const run = await client.pollRun(runId);</code></pre>
+<h3 id="chat">Chat</h3>
+<p>Chat is answered by the LLM the workspace is configured to use — a credential the workspace registered (<a href="byok-llm-credentials.html">bring your own key</a>) or, where allowed, the operator's platform credential. All chat methods take the <code>workspaceId</code> first.</p>
+<h4 id="createchatsession-workspaceid-name-projectid-mode-promise-chatsession"><code>createChatSession(workspaceId, name, { projectId?, mode? }): Promise&lt;ChatSession&gt;</code></h4>
+<p><code>mode</code> is <code>"Guided"</code> (default), <code>"Autonomous"</code> or <code>"ReviewRequired"</code> (tool calls are parked until approved).</p>
+<pre><code class="language-typescript">const session = await client.createChatSession(workspace.id, &quot;Schema exploration&quot;, { mode: &quot;ReviewRequired&quot; });</code></pre>
+<h4 id="sendmessage-workspaceid-sessionid-content-promise-chatturnresult"><code>sendMessage(workspaceId, sessionId, content): Promise&lt;ChatTurnResult&gt;</code></h4>
+<p>Runs the whole turn — model call, tool loop — and returns your message, the reply, every tool invocation, token usage and a stop reason. On a refusal, provider failure or missing credential, <code>assistantMessage</code> is a <code>System</code> notice and <code>stopReason</code> is <code>Refusal</code> / <code>Error</code> / <code>null</code>; no exception is thrown.</p>
+<pre><code class="language-typescript">const turn = await client.sendMessage(workspace.id, session.id, &quot;Show me the schema.&quot;);
+console.log(turn.assistantMessage?.content, turn.usage.totalTokens);
+for (const call of turn.toolInvocations) console.log(call.toolName, call.status);</code></pre>
+<h4 id="streammessage-workspaceid-sessionid-content-asyncgenerator-chatstreamevent"><code>streamMessage(workspaceId, sessionId, content): AsyncGenerator&lt;ChatStreamEvent&gt;</code></h4>
+<p>The same turn as server-sent events: <code>delta</code>, <code>tool_requested</code>, <code>tool_completed</code>, <code>notice</code>, then a terminal <code>completed</code> carrying the full <code>ChatTurnResult</code>.</p>
+<pre><code class="language-typescript">for await (const evt of client.streamMessage(workspace.id, session.id, &quot;Generate 50 rows per table.&quot;)) {
+  if (evt.event === &quot;delta&quot;) process.stdout.write(evt.data.text);
+  if (evt.event === &quot;completed&quot;) console.log(&quot;\nstop:&quot;, evt.data.stopReason);
+}</code></pre>
+<h4 id="listtoolinvocations-workspaceid-sessionid-promise-toolinvocation"><code>listToolInvocations(workspaceId, sessionId): Promise&lt;ToolInvocation[]&gt;</code></h4>
+<h4 id="approvetoolinvocation-workspaceid-sessionid-invocationid-promise-toolapprovalresult"><code>approveToolInvocation(workspaceId, sessionId, invocationId): Promise&lt;ToolApprovalResult&gt;</code></h4>
+<p>Runs a <code>Pending</code> call from a <code>ReviewRequired</code> session (Editor role or above). Once every parked call is decided the model loop resumes and the resulting turn is returned as <code>continuation</code>.</p>
+<pre><code class="language-typescript">const pending = turn.toolInvocations.filter((i) =&gt; i.status === &quot;Pending&quot;);
+for (const call of pending) {
+  const { invocation, continuation } = await client.approveToolInvocation(workspace.id, session.id, call.id);
+  if (continuation) console.log(continuation.assistantMessage?.content);
+}</code></pre>
+<h4 id="getchathistory-workspaceid-sessionid-pagesize-promise-chatmessage"><code>getChatHistory(workspaceId, sessionId, pageSize?): Promise&lt;ChatMessage[]&gt;</code></h4>
+<h4 id="setchatmode-workspaceid-sessionid-mode-promise-chatsession"><code>setChatMode(workspaceId, sessionId, mode): Promise&lt;ChatSession&gt;</code></h4>
+<h4 id="archivechatsession-workspaceid-sessionid-promise-chatsession"><code>archiveChatSession(workspaceId, sessionId): Promise&lt;ChatSession&gt;</code></h4>
+<h3 id="llm-credentials-bring-your-own-key">LLM credentials (bring your own key)</h3>
+<p>Every response is a redacted <code>LlmCredentialSummary</code> (fingerprint and last four characters — never the secret). Register, rotate, revoke and policy changes need the workspace Admin role; list and validate need any role.</p>
+<pre><code class="language-typescript">const credential = await client.registerLlmCredential(workspace.id, {
+  name: &quot;team-anthropic&quot;,
+  provider: &quot;Anthropic&quot;,
+  model: &quot;claude-opus-5&quot;,
+  secret: process.env.ANTHROPIC_API_KEY!,
+  isDefault: true,
+});
 
-<h2 id="chat">Chat</h2>
-<h4>createChatSession(workspaceId, title)</h4>
-<pre><code>const session = await client.createChatSession(workspace.id, "Schema exploration");
-// { id, workspaceId, title, mode, archivedAt, createdAt }</code></pre>
+const check = await client.validateLlmCredential(workspace.id, credential.id);   // minimal provider probe
+await client.rotateLlmCredential(workspace.id, credential.id, &quot;sk-ant-new…&quot;);
+const all = await client.listLlmCredentials(workspace.id);
+await client.revokeLlmCredential(workspace.id, credential.id);                   // soft; excluded immediately
 
-<h4>sendMessage(sessionId, content)</h4>
-<pre><code>const reply = await client.sendMessage(session.id, "Show me the schema.");
-console.log(reply.content);</code></pre>
-
-<h4>getChatHistory(sessionId)</h4>
-<pre><code>const messages = await client.getChatHistory(session.id);</code></pre>
-
-<h4>archiveChatSession(sessionId)</h4>
-<pre><code>await client.archiveChatSession(session.id);</code></pre>
-
-<h2 id="apikeys">API Keys</h2>
-<h4>createApiKey(accountId, displayName, scopes, expiresAt?)</h4>
-<pre><code>const result = await client.createApiKey(
+// Per-workspace policy: platform-credential fallback and which tools the model may be offered.
+await client.setWorkspaceLlmPolicy(workspace.id, { allowPlatformFallback: false, allowedTools: [&quot;discover_schema&quot;] });</code></pre>
+<p>An OpenAI-compatible endpoint (OpenAI, Azure OpenAI, vLLM, Ollama, gateways) uses <code>provider: "OpenAiCompatible"</code> with a public HTTPS <code>endpoint</code>; Bedrock and Vertex use <code>kind: "CloudIdentity"</code> with <code>nonSecretSettings</code> (<code>region</code> / <code>projectId</code>, <code>location</code>) and no secret.</p>
+<h3 id="api-keys">API Keys</h3>
+<h4 id="createapikey-accountid-displayname-scopes-expiresat-promise-apikeycreateresult"><code>createApiKey(accountId, displayName, scopes, expiresAt?): Promise&lt;ApiKeyCreateResult&gt;</code></h4>
+<pre><code class="language-typescript">const result = await client.createApiKey(
   account.id,
-  "ci-pipeline",
-  ["workspace:read", "workspace:write"],
-  "2025-01-01T00:00:00Z"
+  &quot;ci-pipeline&quot;,
+  [&quot;workspace:read&quot;, &quot;workspace:write&quot;],
+  &quot;2025-01-01T00:00:00Z&quot;  // ISO 8601 expiry; omit for no expiry
 );
 console.log(result.secret); // cnc_abc123... — shown once only</code></pre>
-
-<h4>listApiKeys(accountId)</h4>
-<pre><code>const keys = await client.listApiKeys(account.id);</code></pre>
-
-<h4>revokeApiKey(keyId)</h4>
-<pre><code>await client.revokeApiKey("3fa85f64-...");</code></pre>
-
-<h2 id="errors">Error Handling</h2>
-<pre><code>try {
-  const account = await client.getAccount("non-existent");
+<h4 id="listapikeys-accountid-string-promise-apikey"><code>listApiKeys(accountId: string): Promise&lt;ApiKey[]&gt;</code></h4>
+<pre><code class="language-typescript">const keys = await client.listApiKeys(account.id);</code></pre>
+<h4 id="revokeapikey-keyid-string-promise-void"><code>revokeApiKey(keyId: string): Promise&lt;void&gt;</code></h4>
+<pre><code class="language-typescript">await client.revokeApiKey(&quot;3fa85f64-...&quot;);</code></pre>
+<h2 id="error-handling">Error Handling</h2>
+<p>All HTTP errors throw <code>FabricateError</code>:</p>
+<pre><code class="language-typescript">try {
+  const account = await client.getAccount(&quot;non-existent-id&quot;);
 } catch (err) {
   if (err instanceof FabricateError) {
-    console.error(HTTP +""+\+""+: +""+\+"");
-    console.error(err.detail);
+    console.error(`HTTP ${err.status}: ${err.message}`);
+    console.error(err.detail); // Problem Details &quot;detail&quot; field if available
   }
 }</code></pre>
+<h3 id="fabricateerror-properties">FabricateError Properties</h3>
 <table>
-  <tr><th>Property</th><th>Type</th><th>Description</th></tr>
-  <tr><td><code>message</code></td><td>string</td><td>e.g. "HTTP 404 Not Found"</td></tr>
-  <tr><td><code>status</code></td><td>number</td><td>HTTP status code (0 for timeout/cancel errors)</td></tr>
-  <tr><td><code>detail</code></td><td>string?</td><td>Problem Details <code>detail</code> or <code>title</code> field</td></tr>
+<thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>message</code></td><td><code>string</code></td><td><code>"HTTP 404 Not Found"</code></td></tr>
+<tr><td><code>status</code></td><td><code>number</code></td><td>HTTP status code (0 for timeout/cancelled errors)</td></tr>
+<tr><td><code>detail</code></td><td>`string \</td><td>undefined`</td><td>Problem Details <code>detail</code> or <code>title</code> field</td></tr>
+</tbody>
 </table>
-
-<h2 id="types">Exported Types</h2>
-<pre><code>import type {
-  Account, AccountMembership, ApiKey, ApiKeyCreateResult,
-  ChatMessage, ChatSession, FabricateClientOptions,
-  DatasetRun, PaginatedResult, Project, Workspace,
-  Workflow, ComplianceProfile,
-} from "@fabricate/client";</code></pre>
-
-<h2 id="build">Building from Source</h2>
-<pre><code>cd sdk/typescript
+<h2 id="type-definitions">Type Definitions</h2>
+<p>The SDK exports all types from <code>@fabricate/client</code>:</p>
+<pre><code class="language-typescript">import type {
+  Account,
+  AccountMembership,
+  ApiKey,
+  ApiKeyCreateResult,
+  ChatMessage,
+  ChatMode,
+  ChatSession,
+  ChatStreamEvent,
+  ChatTurnResult,
+  FabricateClientOptions,
+  DatasetRun,
+  LlmCredentialSummary,
+  LlmCredentialValidationResult,
+  LlmProvider,
+  PaginatedResult,
+  Project,
+  RegisterLlmCredentialRequest,
+  TokenUsage,
+  ToolApprovalResult,
+  ToolInvocation,
+  Workspace,
+  WorkspaceLlmPolicy,
+  Workflow,
+  ComplianceProfile,
+} from &quot;@fabricate/client&quot;;</code></pre>
+<h2 id="building-from-source">Building from Source</h2>
+<pre><code class="language-bash">cd sdk/typescript
 npm install
 npm run build</code></pre>
-<p>Output in <code>dist/</code>: <code>index.cjs</code>, <code>index.js</code> (ESM), <code>index.d.ts</code>. Built with <strong>tsup</strong>.</p>
+<p>Build output is in <code>dist/</code>. The package uses <strong>tsup</strong> to produce:</p>
+<ul><li><code>dist/index.cjs</code> — CommonJS</li><li><code>dist/index.js</code> — ES Module</li><li><code>dist/index.d.ts</code> — TypeScript declarations</li></ul>
+<h2 id="custom-fetch-node-js-18-testing">Custom Fetch (Node.js &lt; 18 / Testing)</h2>
+<pre><code class="language-typescript">import fetch from &quot;node-fetch&quot;;
 
-<h2 id="custom-fetch">Custom Fetch (Testing)</h2>
-<pre><code>const mockFetch = vi.fn().mockResolvedValue(
-  new Response(JSON.stringify({ id: "acc-1", name: "Test" }), { status: 200 })
+const client = new FabricateClient({
+  baseUrl: &quot;http://localhost:5000&quot;,
+  apiKey: &quot;cnc_...&quot;,
+  fetch: fetch as unknown as typeof globalThis.fetch,
+});</code></pre>
+<p>For testing, pass a mock <code>fetch</code> to intercept requests:</p>
+<pre><code class="language-typescript">const mockFetch = vi.fn().mockResolvedValue(
+  new Response(JSON.stringify({ id: &quot;acc-1&quot;, name: &quot;Test&quot; }), { status: 200 })
 );
 
 const client = new FabricateClient({
-  baseUrl: "http://localhost:5000",
-  apiKey:  "cnc_test",
-  fetch:   mockFetch,
+  baseUrl: &quot;http://localhost:5000&quot;,
+  apiKey: &quot;cnc_test&quot;,
+  fetch: mockFetch,
 });</code></pre>
 </div>
 <footer><p>&copy; 2024 Fabricate contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></p></footer>
