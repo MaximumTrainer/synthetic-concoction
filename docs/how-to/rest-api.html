@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>REST API — Fabricate</title>
+<title>REST API Reference — Fabricate</title>
 <style></style>
 </head>
 <body>
@@ -14,236 +14,320 @@
     <li><a href="compliance-profiles.html">Compliance</a></li>
     <li><a href="rest-api.html">API</a></li>
     <li><a href="typescript-sdk.html">TypeScript SDK</a></li>
+    <li><a href="self-hosting.html">Self-hosting</a></li>
     <li><a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></li>
   </ul>
 </nav>
 <div class="page">
 <h1>REST API Reference</h1>
-<p>ASP.NET Core Minimal API. Listens on port 5000 by default. Swagger UI at <code>/swagger</code>.</p>
-
-<h2 id="auth">Authentication</h2>
-<p>All endpoints require the <code>X-Api-Key</code> header:</p>
-<pre><code>X-Api-Key: cnc_yoursecrethere</code></pre>
+<p>The Fabricate REST API is an ASP.NET Core Minimal API. It listens on port 5000 by default and exposes Swagger UI at <code>/swagger</code>.</p>
+<h2 id="authentication">Authentication</h2>
+<p>All endpoints require the <code>X-Api-Key</code> header with a valid API key:</p>
+<pre><code class="language-http">X-Api-Key: cnc_yoursecrethere</code></pre>
+<p>Keys are created via <code>POST /accounts/{accountId}/api-keys</code>. The plaintext secret is shown only once at creation time; the platform stores only the SHA-256 hash.</p>
 <p>Missing or invalid keys return <code>401 Unauthorized</code>.</p>
-
-<h2 id="ratelimit">Rate Limiting</h2>
-<p>Fixed window: <strong>100 requests per minute</strong>. Exceeding the limit returns <code>429 Too Many Requests</code>.</p>
-
-<h2 id="swagger">Swagger UI</h2>
-<p><a href="http://localhost:5000/swagger">http://localhost:5000/swagger</a> — all routes described with OpenAPI annotations.</p>
-
+<h2 id="rate-limiting">Rate Limiting</h2>
+<p>Fixed window: <strong>100 requests per minute per API key</strong>, applied to every authenticated route group and configurable with <code>FABRICATE_API_RATE_LIMIT_PER_MINUTE</code>. The window is partitioned per key, so one key exhausting its allowance does not affect another. Exceeding it returns <code>429 Too Many Requests</code> with a <code>Retry-After</code> header and a <code>ProblemDetails</code> body. <code>/healthz</code> and the Swagger endpoints are not limited.</p>
+<p>Credential validation (<code>POST /workspaces/{id}/llm-credentials/{id}/validate</code>) has a stricter window of <strong>10 requests per minute per key</strong>, because it makes a real provider call.</p>
+<h2 id="base-url">Base URL</h2>
+<pre><code>http://localhost:5000</code></pre>
+<p>Replace with your deployed URL in production.</p>
+<h2 id="swagger-ui">Swagger UI</h2>
+<pre><code>http://localhost:5000/swagger</code></pre>
+<p>All routes are described with OpenAPI annotations.</p>
 <h2 id="accounts">Accounts</h2>
+<h3 id="post-accounts">POST /accounts</h3>
+<p>Create a new account.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-http">POST /accounts
+X-Api-Key: cnc_...
+Content-Type: application/json
 
-<h4>POST /accounts</h4>
-<pre><code>POST /accounts
-{ "name": "Acme Corp" }
-
-200 OK
-{ "id": "3fa85f64-...", "name": "Acme Corp", "createdAt": "2024-06-01T10:00:00Z" }</code></pre>
-
-<h4>GET /accounts/{id}</h4>
-<pre><code>GET /accounts/3fa85f64-...
-
-200 OK  { "id": "3fa85f64-...", "name": "Acme Corp", "createdAt": "..." }
-404     Account not found</code></pre>
-
-<h4>GET /accounts/{id}/members</h4>
-<pre><code>200 OK
-[{ "accountId": "...", "userId": "usr_alice", "role": "Owner", "joinedAt": "..." }]</code></pre>
-
-<h4>POST /accounts/{id}/invitations</h4>
-<pre><code>POST /accounts/3fa85f64-.../invitations
-{ "inviteeEmail": "bob@example.com", "expiry": "48:00:00" }
-
-200 OK  (invitation object with token)</code></pre>
-
-<h4>POST /accounts/invitations/accept</h4>
-<pre><code>POST /accounts/invitations/accept
-{ "token": "invite_abc123..." }
-
-200 OK  (AccountMembership)</code></pre>
-
+{ &quot;name&quot;: &quot;Acme Corp&quot; }</code></pre>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;3fa85f64-5717-4562-b3fc-2c963f66afa6&quot;,
+  &quot;name&quot;: &quot;Acme Corp&quot;,
+  &quot;createdAt&quot;: &quot;2024-06-01T10:00:00Z&quot;
+}</code></pre>
+<h3 id="get-accounts-id">GET /accounts/{id}</h3>
+<p>Get account details.</p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;3fa85f64-...&quot;,
+  &quot;name&quot;: &quot;Acme Corp&quot;,
+  &quot;createdAt&quot;: &quot;2024-06-01T10:00:00Z&quot;
+}</code></pre>
+<p><strong>Response 404:</strong> Account not found.</p>
+<h3 id="get-accounts-id-members">GET /accounts/{id}/members</h3>
+<p>List members of an account.</p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">[
+  {
+    &quot;accountId&quot;: &quot;3fa85f64-...&quot;,
+    &quot;userId&quot;: &quot;usr_alice&quot;,
+    &quot;role&quot;: &quot;Owner&quot;,
+    &quot;joinedAt&quot;: &quot;2024-06-01T10:00:00Z&quot;
+  }
+]</code></pre>
+<h3 id="post-accounts-id-invitations">POST /accounts/{id}/invitations</h3>
+<p>Invite a user to an account.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;inviteeEmail&quot;: &quot;bob@example.com&quot;,
+  &quot;expiry&quot;: &quot;48:00:00&quot;
+}</code></pre>
+<p><strong>Response 200:</strong> Returns the created invitation object with a time-limited token.</p>
+<h3 id="post-accounts-invitations-accept">POST /accounts/invitations/accept</h3>
+<p>Accept an invitation using the token from the invitation email.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{ &quot;token&quot;: &quot;invite_abc123...&quot; }</code></pre>
+<p><strong>Response 200:</strong> Returns the new <code>AccountMembership</code>.</p>
 <h2 id="workspaces">Workspaces</h2>
-
-<h4>POST /workspaces</h4>
-<pre><code>POST /workspaces
-{ "accountId": "3fa85f64-...", "name": "Production Clone" }
-
-200 OK  { "id": "9a3b2c1d-...", "accountId": "...", "name": "Production Clone", "createdAt": "..." }</code></pre>
-
-<h4>GET /workspaces/{id}</h4>
-<pre><code>GET /workspaces/9a3b2c1d-...</code></pre>
-
-<h4>POST /workspaces/{id}/members</h4>
-<pre><code>{ "userId": "usr_bob", "role": "Editor" }
-Roles: Viewer | Editor | Admin</code></pre>
-
-<h4>DELETE /workspaces/{id}/members/{userId}</h4>
-<pre><code>204 No Content</code></pre>
-
+<h3 id="post-workspaces">POST /workspaces</h3>
+<p>Create a workspace under an account.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;accountId&quot;: &quot;3fa85f64-...&quot;,
+  &quot;name&quot;: &quot;Production Clone&quot;
+}</code></pre>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;9a3b2c1d-...&quot;,
+  &quot;accountId&quot;: &quot;3fa85f64-...&quot;,
+  &quot;name&quot;: &quot;Production Clone&quot;,
+  &quot;createdAt&quot;: &quot;2024-06-01T10:05:00Z&quot;
+}</code></pre>
+<h3 id="get-workspaces-id">GET /workspaces/{id}</h3>
+<p>Get workspace details.</p>
+<h3 id="post-workspaces-id-members">POST /workspaces/{id}/members</h3>
+<p>Add a member to a workspace with a role.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;userId&quot;: &quot;usr_bob&quot;,
+  &quot;role&quot;: &quot;Editor&quot;
+}</code></pre>
+<p>Roles: <code>Viewer</code>, <code>Editor</code>, <code>Admin</code>.</p>
+<h3 id="delete-workspaces-id-members-userid">DELETE /workspaces/{id}/members/{userId}</h3>
+<p>Remove a member from a workspace.</p>
+<p><strong>Response 204:</strong> No content.</p>
 <h2 id="projects">Projects</h2>
-
-<h4>POST /projects</h4>
-<pre><code>POST /projects
-{ "workspaceId": "9a3b2c1d-...", "name": "Orders Dataset" }
-
-200 OK  { "id": "proj-001", "workspaceId": "...", "name": "Orders Dataset", "isArchived": false, "createdAt": "..." }</code></pre>
-
-<h4>GET /projects/{id}</h4>
-<pre><code>404 if project not found or archived</code></pre>
-
-<h4>DELETE /projects/{id}</h4>
-<p>Soft-delete (archive). Returns archived project with <code>isArchived: true</code>.</p>
-
+<h3 id="post-projects">POST /projects</h3>
+<p>Create a project under a workspace.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;workspaceId&quot;: &quot;9a3b2c1d-...&quot;,
+  &quot;name&quot;: &quot;Orders Dataset&quot;
+}</code></pre>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;proj-001&quot;,
+  &quot;workspaceId&quot;: &quot;9a3b2c1d-...&quot;,
+  &quot;name&quot;: &quot;Orders Dataset&quot;,
+  &quot;isArchived&quot;: false,
+  &quot;createdAt&quot;: &quot;2024-06-01T10:10:00Z&quot;
+}</code></pre>
+<h3 id="get-projects-id">GET /projects/{id}</h3>
+<p>Get project details.</p>
+<p><strong>Response 404:</strong> Project not found or archived.</p>
+<h3 id="delete-projects-id">DELETE /projects/{id}</h3>
+<p>Soft-delete (archive) a project.</p>
+<p><strong>Response 200:</strong> Returns the archived project with <code>isArchived: true</code>.</p>
 <h2 id="runs">Runs</h2>
-
-<h4>GET /runs</h4>
-<p>Query params: <code>page</code> (default 1), <code>pageSize</code> (default 20).</p>
-<pre><code>200 OK
-{
-  "items": [{
-    "id": "run-abc123",
-    "status": "Completed",
-    "createdAt": "...", "startedAt": "...", "completedAt": "...",
-    "seed": 42,
-    "requestedRowCounts": { "public.users": 100 }
-  }],
-  "totalCount": 1,
-  "page": 1,
-  "pageSize": 20
-}</code></pre>
-
-<h4>Run Status Values</h4>
+<h3 id="get-runs">GET /runs</h3>
+<p>List dataset runs with pagination.</p>
+<p><strong>Query Parameters:</strong></p>
 <table>
-  <tr><th>Status</th><th>Description</th></tr>
-  <tr><td>Queued</td><td>Awaiting execution</td></tr>
-  <tr><td>Running</td><td>In progress</td></tr>
-  <tr><td>Completed</td><td>Finished successfully</td></tr>
-  <tr><td>Failed</td><td>Terminated with error</td></tr>
-  <tr><td>Cancelled</td><td>Cancelled before completion</td></tr>
+<thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>page</code></td><td>1</td><td>Page number (1-based)</td></tr>
+<tr><td><code>pageSize</code></td><td>20</td><td>Results per page</td></tr>
+</tbody>
 </table>
-
-<h4>GET /runs/{id}</h4>
-<pre><code>200 OK  (DatasetRun object)
-404     Run not found</code></pre>
-
-<h4>POST /runs/{id}/cancel</h4>
-<pre><code>200 OK  (updated run)
-409     Run is not in a cancellable state</code></pre>
-
-<h2 id="workflows">Workflows</h2>
-
-<h4>POST /workflows</h4>
-<pre><code>POST /workflows
-{
-  "workspaceId": "9a3b2c1d-...",
-  "name": "Nightly Seed Refresh",
-  "steps": [
-    { "type": "generate", "rows": 500 },
-    { "type": "export", "format": "sql" }
-  ]
-}
-
-200 OK  { "id": "wf-001", "workspaceId": "...", "name": "...", "isDisabled": false, "createdAt": "..." }</code></pre>
-
-<h4>GET /workflows/{id}</h4>
-<h4>POST /workflows/{id}/run</h4>
-<pre><code>200 OK  { "runId": "run-xyz789" }</code></pre>
-<h4>GET /workflows/{id}/runs</h4>
-
-<h2 id="chat">Chat</h2>
-
-<h4>GET /chat/sessions</h4>
-<h4>POST /chat/sessions</h4>
-<pre><code>POST /chat/sessions
-{ "workspaceId": "9a3b2c1d-...", "title": "Schema exploration" }
-
-200 OK  { "id": "sess-001", "workspaceId": "...", "title": "...", "mode": "standard", "archivedAt": null, "createdAt": "..." }</code></pre>
-
-<h4>POST /workspaces/{workspaceId}/chat/sessions/{id}/messages</h4>
-<p>Runs the whole turn — persists the message, calls the workspace's configured model with the composed instructions, history and allowed tools, executes any tool calls it makes (up to <code>FABRICATE_LLM_MAX_TOOL_ITERATIONS</code> rounds) and returns the turn.</p>
-<pre><code>POST /workspaces/9a3b.../chat/sessions/sess-001/messages
-{ "content": "Discover the schema for this database." }
-
-200 OK
-{
-  "userMessage":      { "id": "msg-001", "role": "User", "content": "Discover the schema...", "createdAt": "..." },
-  "assistantMessage": { "id": "msg-003", "role": "Assistant", "content": "I found 3 tables...", "createdAt": "..." },
-  "toolInvocations":  [ { "id": "inv-001", "toolName": "discover_schema", "status": "Succeeded", "outputJson": "{...}" } ],
-  "usage":            { "inputTokens": 1210, "outputTokens": 342, "totalTokens": 1552 },
-  "stopReason":       "EndTurn"
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;run-abc123&quot;,
+      &quot;status&quot;: &quot;Completed&quot;,
+      &quot;createdAt&quot;: &quot;2024-06-01T10:00:00Z&quot;,
+      &quot;startedAt&quot;: &quot;2024-06-01T10:00:01Z&quot;,
+      &quot;completedAt&quot;: &quot;2024-06-01T10:00:05Z&quot;,
+      &quot;seed&quot;: 42,
+      &quot;requestedRowCounts&quot;: { &quot;public.users&quot;: 100 }
+    }
+  ],
+  &quot;totalCount&quot;: 1,
+  &quot;page&quot;: 1,
+  &quot;pageSize&quot;: 20
 }</code></pre>
-<p><code>stopReason</code> is <code>Refusal</code> when the provider declined and <code>Error</code> when the call failed; both arrive as a <code>System</code>-role notice, never an error response. With no LLM credential configured the notice says how to register one (see <a href="byok-llm-credentials.html">Bring your own LLM key</a>); <code>/tool &lt;name&gt; &lt;json&gt;</code> still runs a tool directly. Session <code>mode</code> is <code>Guided</code>, <code>Autonomous</code> or <code>ReviewRequired</code> (tool calls parked until approved).</p>
+<h3 id="get-runs-id">GET /runs/{id}</h3>
+<p>Get a specific run.</p>
+<p><strong>Run Status Values:</strong></p>
+<table>
+<thead><tr><th>Status</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>Queued</code></td><td>Awaiting execution</td></tr>
+<tr><td><code>Running</code></td><td>In progress</td></tr>
+<tr><td><code>Completed</code></td><td>Finished successfully</td></tr>
+<tr><td><code>Failed</code></td><td>Terminated with error</td></tr>
+<tr><td><code>Cancelled</code></td><td>Cancelled before completion</td></tr>
+</tbody>
+</table>
+<h3 id="post-runs-id-cancel">POST /runs/{id}/cancel</h3>
+<p>Cancel a queued or running run.</p>
+<p><strong>Response 200:</strong> Returns the updated run. <strong>Response 409:</strong> Run is not in a cancellable state.</p>
+<h2 id="workflows">Workflows</h2>
+<h3 id="post-workflows">POST /workflows</h3>
+<p>Create a workflow.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;workspaceId&quot;: &quot;9a3b2c1d-...&quot;,
+  &quot;name&quot;: &quot;Nightly Seed Refresh&quot;,
+  &quot;steps&quot;: [
+    { &quot;type&quot;: &quot;generate&quot;, &quot;rows&quot;: 500 },
+    { &quot;type&quot;: &quot;export&quot;, &quot;format&quot;: &quot;sql&quot; }
+  ]
+}</code></pre>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;wf-001&quot;,
+  &quot;workspaceId&quot;: &quot;9a3b2c1d-...&quot;,
+  &quot;name&quot;: &quot;Nightly Seed Refresh&quot;,
+  &quot;isDisabled&quot;: false,
+  &quot;createdAt&quot;: &quot;2024-06-01T10:00:00Z&quot;
+}</code></pre>
+<h3 id="get-workflows-id">GET /workflows/{id}</h3>
+<p>Get workflow details.</p>
+<h3 id="post-workflows-id-run">POST /workflows/{id}/run</h3>
+<p>Trigger a workflow execution.</p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{ &quot;runId&quot;: &quot;run-xyz789&quot; }</code></pre>
+<p>Use <code>GET /runs/{runId}</code> to track progress.</p>
+<h3 id="get-workflows-id-runs">GET /workflows/{id}/runs</h3>
+<p>List all runs for a workflow.</p>
+<h2 id="chat">Chat</h2>
+<h3 id="get-chat-sessions">GET /chat/sessions</h3>
+<p>List chat sessions for the authenticated user.</p>
+<h3 id="post-chat-sessions">POST /chat/sessions</h3>
+<p>Create a new chat session.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;workspaceId&quot;: &quot;9a3b2c1d-...&quot;,
+  &quot;title&quot;: &quot;Schema exploration&quot;
+}</code></pre>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;sess-001&quot;,
+  &quot;workspaceId&quot;: &quot;9a3b2c1d-...&quot;,
+  &quot;title&quot;: &quot;Schema exploration&quot;,
+  &quot;mode&quot;: &quot;standard&quot;,
+  &quot;archivedAt&quot;: null,
+  &quot;createdAt&quot;: &quot;2024-06-01T10:00:00Z&quot;
+}</code></pre>
+<h3 id="post-workspaces-workspaceid-chat-sessions-id-messages">POST /workspaces/{workspaceId}/chat/sessions/{id}/messages</h3>
+<p>Send a message. The whole turn runs before the response returns: the message is persisted, the configured model is called with the composed instructions, history and the workspace's allowed tools, any tool calls the model makes are executed and fed back (up to <code>FABRICATE_LLM_MAX_TOOL_ITERATIONS</code> rounds), and the final reply is persisted.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{ &quot;content&quot;: &quot;Discover the schema for this database.&quot; }</code></pre>
+<p><strong>Response 200</strong> — the turn:</p>
+<pre><code class="language-json">{
+  &quot;userMessage&quot;:      { &quot;id&quot;: &quot;msg-001&quot;, &quot;role&quot;: &quot;User&quot;, &quot;content&quot;: &quot;Discover the schema…&quot;, &quot;createdAt&quot;: &quot;…&quot; },
+  &quot;assistantMessage&quot;: { &quot;id&quot;: &quot;msg-003&quot;, &quot;role&quot;: &quot;Assistant&quot;, &quot;content&quot;: &quot;I found 3 tables: users, orders, order_items…&quot;, &quot;createdAt&quot;: &quot;…&quot; },
+  &quot;toolInvocations&quot;: [
+    { &quot;id&quot;: &quot;inv-001&quot;, &quot;toolName&quot;: &quot;discover_schema&quot;, &quot;inputJson&quot;: &quot;{}&quot;, &quot;outputJson&quot;: &quot;{…}&quot;, &quot;status&quot;: &quot;Succeeded&quot;, &quot;startedAt&quot;: &quot;…&quot;, &quot;completedAt&quot;: &quot;…&quot; }
+  ],
+  &quot;usage&quot;: { &quot;inputTokens&quot;: 1210, &quot;outputTokens&quot;: 342, &quot;totalTokens&quot;: 1552 },
+  &quot;stopReason&quot;: &quot;EndTurn&quot;
+}</code></pre>
+<p><code>stopReason</code> is <code>Refusal</code> when the provider declined, and <code>Error</code> when the provider call failed; in both cases <code>assistantMessage</code> is a <code>System</code>-role notice and no exception is raised. When the workspace has no LLM credential the notice explains how to register one — see <a href="byok-llm-credentials.html">Bring your own LLM key</a>. Messages starting with <code>/tool &lt;name&gt; &lt;json&gt;</code> bypass the model and run the tool directly.</p>
+<p>Session modes: <code>Guided</code> (the model explains before acting), <code>Autonomous</code> (tools run without confirmation), <code>ReviewRequired</code> (tool calls are parked as <code>Pending</code> until approved — see below).</p>
+<h3 id="post-workspaces-workspaceid-chat-sessions-id-messages-stream">POST /workspaces/{workspaceId}/chat/sessions/{id}/messages/stream</h3>
+<p>Same as above, streamed as server-sent events. One <code>event:</code>/<code>data:</code> pair per event, terminated by <code>completed</code>:</p>
+<pre><code>event: delta
+data: {&quot;text&quot;:&quot;I found &quot;}
 
-<h4>POST /workspaces/{workspaceId}/chat/sessions/{id}/messages/stream</h4>
-<p>Same turn as server-sent events: <code>delta</code>, <code>tool_requested</code>, <code>tool_completed</code>, <code>notice</code>, then a terminal <code>completed</code> carrying the turn.</p>
+event: tool_completed
+data: {&quot;id&quot;:&quot;inv-001&quot;,&quot;toolName&quot;:&quot;discover_schema&quot;,&quot;status&quot;:&quot;Succeeded&quot;,…}
 
-<h4>GET /workspaces/{workspaceId}/chat/sessions/{id}/tool-invocations</h4>
-<h4>POST /workspaces/{workspaceId}/chat/sessions/{id}/tool-invocations/{invocationId}/approve</h4>
-<p>Runs a <code>Pending</code> invocation from a <code>ReviewRequired</code> session. Requires the workspace Editor role or above.</p>
-
-<h2 id="llmcredentials">LLM Credentials</h2>
-<p>Bring-your-own-key credentials scoped to a workspace. Every response is a redacted summary (fingerprint and last four characters — never the secret). Register, rotate, revoke and policy changes require the workspace <strong>Admin</strong> role; list and validate need any role. A credential id from another workspace returns <code>404</code>. Full guide: <a href="byok-llm-credentials.html">Bring your own LLM key</a>.</p>
+event: completed
+data: {&quot;userMessage&quot;:…,&quot;assistantMessage&quot;:…,&quot;toolInvocations&quot;:[…],&quot;usage&quot;:…,&quot;stopReason&quot;:&quot;EndTurn&quot;}</code></pre>
+<p>Other events: <code>tool_requested</code> (a call parked for approval) and <code>notice</code>.</p>
+<h3 id="get-workspaces-workspaceid-chat-sessions-id-tool-invocations">GET /workspaces/{workspaceId}/chat/sessions/{id}/tool-invocations</h3>
+<p>Every tool invocation for the session, oldest first.</p>
+<h3 id="post-workspaces-workspaceid-chat-sessions-id-tool-invocations-invocationid-approve">POST /workspaces/{workspaceId}/chat/sessions/{id}/tool-invocations/{invocationId}/approve</h3>
+<p>Runs a <code>Pending</code> invocation from a <code>ReviewRequired</code> session. Requires the workspace <strong>Editor</strong> role or above. Returns the completed invocation.</p>
+<h2 id="llm-credentials">LLM Credentials</h2>
+<p>Bring-your-own-key credentials scoped to a workspace. Every response is a redacted summary (fingerprint and last four characters — never the secret). Register, rotate, revoke and policy changes require the workspace <strong>Admin</strong> role; list and validate need any role. Full guide: <a href="byok-llm-credentials.html">Bring your own LLM key</a>.</p>
 <table>
 <thead><tr><th>Method</th><th>Route</th><th>Purpose</th></tr></thead>
 <tbody>
-<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials</code></td><td>Register: <code>name</code>, <code>provider</code>, <code>model</code>, <code>secret</code>, optional <code>kind</code>, <code>endpoint</code>, <code>projectId</code>, <code>nonSecretSettings</code>, <code>isDefault</code>. Returns <code>201</code> + summary.</td></tr>
+<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials</code></td><td>Register. Body: <code>name</code>, <code>provider</code>, <code>model</code>, <code>secret</code>, optional <code>kind</code>, <code>endpoint</code>, <code>projectId</code>, <code>nonSecretSettings</code>, <code>isDefault</code>. Returns <code>201</code> + summary.</td></tr>
 <tr><td><code>GET</code></td><td><code>/workspaces/{workspaceId}/llm-credentials</code></td><td>List summaries.</td></tr>
-<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/{id}/rotate</code></td><td><code>{ "secret": "..." }</code></td></tr>
-<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/{id}/validate</code></td><td>Minimal provider probe, rate-limited to 10/min. Returns <code>{ isValid, message, checkedAt }</code>.</td></tr>
+<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/{id}/rotate</code></td><td>Body: <code>{ "secret": "…" }</code>.</td></tr>
+<tr><td><code>POST</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/{id}/validate</code></td><td>Minimal provider probe; rate-limited to 10/min. Returns <code>{ isValid, message, checkedAt }</code>.</td></tr>
 <tr><td><code>DELETE</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/{id}</code></td><td>Soft revoke. <code>204</code>.</td></tr>
-<tr><td><code>GET</code> / <code>PUT</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/policy</code></td><td><code>{ "allowPlatformFallback": true }</code></td></tr>
+<tr><td><code>GET</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/policy</code></td><td><code>{ allowPlatformFallback }</code></td></tr>
+<tr><td><code>PUT</code></td><td><code>/workspaces/{workspaceId}/llm-credentials/policy</code></td><td>Body: <code>{ "allowPlatformFallback": true }</code></td></tr>
 </tbody>
 </table>
-
-<h2 id="apikeys">API Keys</h2>
-
-<h4>POST /accounts/{accountId}/api-keys</h4>
-<pre><code>POST /accounts/3fa85f64-.../api-keys
-{
-  "name": "ci-pipeline",
-  "scopes": ["workspace:read", "workspace:write"],
-  "expiry": "90.00:00:00"
-}
-
-200 OK
-{
-  "id": "3fa85f64-...",
-  "name": "ci-pipeline",
-  "plaintextSecret": "cnc_abc123...",
-  "scopes": ["workspace:read","workspace:write"],
-  "expiresAt": "2024-09-01T00:00:00Z"
+<p>A credential id from another workspace returns <code>404</code>.</p>
+<h2 id="api-keys">API Keys</h2>
+<h3 id="post-accounts-accountid-api-keys">POST /accounts/{accountId}/api-keys</h3>
+<p>Create an API key.</p>
+<p><strong>Request:</strong></p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;ci-pipeline&quot;,
+  &quot;scopes&quot;: [&quot;workspace:read&quot;, &quot;workspace:write&quot;],
+  &quot;expiry&quot;: &quot;90.00:00:00&quot;
 }</code></pre>
-<p>The <code>plaintextSecret</code> is shown <strong>once only</strong>.</p>
-
-<h4>GET /accounts/{accountId}/api-keys</h4>
-<p>Returns metadata only (no secrets).</p>
-
-<h4>DELETE /accounts/{accountId}/api-keys/{keyId}</h4>
-<p>Revokes the key immediately. Returns revoked key with <code>isRevoked: true</code>.</p>
-
-<h2 id="errors">Error Responses</h2>
-<p>All errors use RFC 7807 Problem Details format:</p>
-<pre><code>{
-  "type": "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-  "title": "Not Found",
-  "status": 404,
-  "detail": "Account 3fa85f64-... was not found."
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;3fa85f64-...&quot;,
+  &quot;name&quot;: &quot;ci-pipeline&quot;,
+  &quot;plaintextSecret&quot;: &quot;cnc_abc123...&quot;,
+  &quot;scopes&quot;: [&quot;workspace:read&quot;, &quot;workspace:write&quot;],
+  &quot;expiresAt&quot;: &quot;2024-09-01T00:00:00Z&quot;
+}</code></pre>
+<p>The <code>plaintextSecret</code> is shown <strong>only once</strong>. Store it securely.</p>
+<h3 id="get-accounts-accountid-api-keys">GET /accounts/{accountId}/api-keys</h3>
+<p>List API keys for an account (metadata only, no secrets).</p>
+<p><strong>Response 200:</strong></p>
+<pre><code class="language-json">[
+  {
+    &quot;id&quot;: &quot;3fa85f64-...&quot;,
+    &quot;name&quot;: &quot;ci-pipeline&quot;,
+    &quot;scopes&quot;: [&quot;workspace:read&quot;],
+    &quot;expiresAt&quot;: &quot;2024-09-01T00:00:00Z&quot;,
+    &quot;isRevoked&quot;: false,
+    &quot;createdAt&quot;: &quot;2024-06-01T10:00:00Z&quot;
+  }
+]</code></pre>
+<h3 id="delete-accounts-accountid-api-keys-keyid">DELETE /accounts/{accountId}/api-keys/{keyId}</h3>
+<p>Revoke an API key. The key is immediately invalid.</p>
+<p><strong>Response 200:</strong> Returns the revoked key with <code>isRevoked: true</code>.</p>
+<h2 id="error-responses">Error Responses</h2>
+<p>All error responses follow the RFC 7807 Problem Details format:</p>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;https://tools.ietf.org/html/rfc7231#section-6.5.4&quot;,
+  &quot;title&quot;: &quot;Not Found&quot;,
+  &quot;status&quot;: 404,
+  &quot;detail&quot;: &quot;Account 3fa85f64-... was not found.&quot;
 }</code></pre>
 <table>
-  <tr><th>Status</th><th>Meaning</th></tr>
-  <tr><td>400</td><td>Bad request (validation failed)</td></tr>
-  <tr><td>401</td><td>Missing or invalid API key</td></tr>
-  <tr><td>403</td><td>Insufficient scopes</td></tr>
-  <tr><td>404</td><td>Resource not found</td></tr>
-  <tr><td>409</td><td>Conflict (e.g. cancel a completed run)</td></tr>
-  <tr><td>429</td><td>Rate limit exceeded</td></tr>
-  <tr><td>500</td><td>Internal server error</td></tr>
+<thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>400</td><td>Bad request (validation failed)</td></tr>
+<tr><td>401</td><td>Missing or invalid API key</td></tr>
+<tr><td>403</td><td>Insufficient scopes</td></tr>
+<tr><td>404</td><td>Resource not found</td></tr>
+<tr><td>409</td><td>Conflict (e.g. cancel a completed run)</td></tr>
+<tr><td>429</td><td>Rate limit exceeded</td></tr>
+<tr><td>500</td><td>Internal server error</td></tr>
+</tbody>
 </table>
-
-<h2 id="start">Starting the API Locally</h2>
-<pre><code>dotnet run --project ./Fabricate.Api/Fabricate.Api.csproj</code></pre>
-<p>Default: SQLite at <code>fabricate.db</code> in the working directory. Configure PostgreSQL via <code>appsettings.json</code> or environment variables.</p>
+<h2 id="starting-the-api-locally">Starting the API Locally</h2>
+<pre><code class="language-bash">dotnet run --project ./Fabricate.Api/Fabricate.Api.csproj</code></pre>
+<p>The API uses SQLite at <code>fabricate.db</code> in the working directory by default. To use PostgreSQL, set the connection string via environment variables or <code>appsettings.json</code>.</p>
 </div>
 <footer><p>&copy; 2024 Fabricate contributors &bull; MIT Licence &bull; <a href="https://github.com/MaximumTrainer/synthetic-fabricate">GitHub</a></p></footer>
 </body>

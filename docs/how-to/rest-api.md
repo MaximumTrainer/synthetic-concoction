@@ -16,7 +16,13 @@ Missing or invalid keys return `401 Unauthorized`.
 
 ## Rate Limiting
 
-Fixed window: **100 requests per minute**. Exceeding the limit returns `429 Too Many Requests`.
+Fixed window: **100 requests per minute per API key**, applied to every authenticated route group and configurable
+with `FABRICATE_API_RATE_LIMIT_PER_MINUTE`. The window is partitioned per key, so one key exhausting its allowance
+does not affect another. Exceeding it returns `429 Too Many Requests` with a `Retry-After` header and a
+`ProblemDetails` body. `/healthz` and the Swagger endpoints are not limited.
+
+Credential validation (`POST /workspaces/{id}/llm-credentials/{id}/validate`) has a stricter window of **10 requests
+per minute per key**, because it makes a real provider call.
 
 ## Base URL
 

@@ -32,6 +32,7 @@
 <tr><td><code>FABRICATE_CONNECTION_STRING</code></td><td>with <code>postgres</code></td><td>PostgreSQL connection string. Carries credentials — set it as a <strong>secret</strong>.</td></tr>
 <tr><td><code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code></td><td>recommended</td><td>Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances; see <a href="#key-ring">Key ring</a>.</td></tr>
 <tr><td><code>ASPNETCORE_URLS</code></td><td>no</td><td>Defaults to <code>http://+:8080</code> in the image. TLS is terminated by your platform.</td></tr>
+<tr><td><code>FABRICATE_API_RATE_LIMIT_PER_MINUTE</code></td><td>no</td><td>Requests per minute per API key across every authenticated route (default 100). <code>/healthz</code> and Swagger are exempt. Exceeding it returns <code>429</code> with <code>Retry-After</code>.</td></tr>
 <tr><td><code>FABRICATE_ARTIFACTS_PATH</code></td><td>no</td><td>Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart. Object storage is a tracked follow-up.</td></tr>
 </tbody>
 </table>
