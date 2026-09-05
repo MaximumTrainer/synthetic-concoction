@@ -59,6 +59,17 @@ public sealed class FileSystemArtifactStore(string baseDirectory) : IArtifactSto
         return Task.FromResult(artifacts);
     }
 
+    /// <summary>Removes every artifact stored for a run. Returns how many files went (#84).</summary>
+    public int DeleteRun(string runId)
+    {
+        var dir = Path.Combine(baseDirectory, Path.GetFileName(runId));
+        if (!Directory.Exists(dir)) return 0;
+
+        var count = Directory.GetFiles(dir, "*", SearchOption.AllDirectories).Length;
+        Directory.Delete(dir, recursive: true);
+        return count;
+    }
+
     /// <summary>Computes a SHA-256 checksum hex string for the file at <paramref name="path"/>.</summary>
     public static async Task<string> ComputeChecksumAsync(string path, CancellationToken cancellationToken = default)
     {

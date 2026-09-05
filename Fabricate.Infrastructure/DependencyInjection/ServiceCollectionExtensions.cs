@@ -157,16 +157,36 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IExporter, SqlExporter>();
         services.AddSingleton<IExporter, ParquetExporter>();
 
-        // Generated artifacts go to FABRICATE_ARTIFACTS_PATH when set, else the OS temp directory. On hosted platforms
-        // the container filesystem is ephemeral either way; point this at a mounted volume if artifacts must outlive
-        // a restart (object storage is tracked as a follow-up on #61).
-        services.AddSingleton<IArtifactStore>(_ =>
+        // Where generated artifacts live (#84). The filesystem remains the default because it needs no
+        // configuration; it is only wrong on a hosted target, where the container filesystem does not survive a
+        // restart and a completed run ends up pointing at files that no longer exist.
+        services.TryAddSingleton(ArtifactStoreOptions.FromEnvironment(Environment.GetEnvironmentVariable));
+
+        services.AddSingleton<IArtifactStore>(sp =>
         {
-            var configured = Environment.GetEnvironmentVariable("FABRICATE_ARTIFACTS_PATH");
-            var baseDir = string.IsNullOrWhiteSpace(configured)
-                ? Path.Combine(Path.GetTempPath(), "fabricate-artifacts")
-                : configured;
-            return new FileSystemArtifactStore(baseDir);
+            var options = sp.GetRequiredService<ArtifactStoreOptions>();
+
+            var errors = options.Validate();
+            if (errors.Count > 0)
+            {
+                // Refused at startup rather than on the first run: a misconfigured store that only fails once
+                // someone generates data wastes the run and is discovered at the worst moment.
+                throw new InvalidOperationException(
+                    "Artifact storage configuration is invalid:\n - " + string.Join("\n - ", errors));
+            }
+
+            if (!options.IsObjectStorage)
+            {
+                var configured = Environment.GetEnvironmentVariable("FABRICATE_ARTIFACTS_PATH");
+                var baseDir = string.IsNullOrWhiteSpace(configured)
+                    ? Path.Combine(Path.GetTempPath(), "fabricate-artifacts")
+                    : configured;
+                return new FileSystemArtifactStore(baseDir);
+            }
+
+            return new S3ArtifactStore(
+                S3ClientFactory.Create(options, sp.GetRequiredService<ISecretProvider>()),
+                options.BucketName!);
         });
 
         services.AddSingleton<IDataProfiler>(sp =>

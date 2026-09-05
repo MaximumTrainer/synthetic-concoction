@@ -175,6 +175,13 @@ public sealed class RunExecutionService(
 
         var stored = await artifactStore.ListAsync(runId.ToString(), cancellationToken).ConfigureAwait(false);
 
+        // A run whose artifacts were purged by retention (#84) reports an empty manifest rather than the paths it
+        // used to have. Returning stale paths would let a caller download nothing and blame the download.
+        if (stored.Count == 0 && run.ArtifactChecksums is { Count: > 0 })
+        {
+            return [];
+        }
+
         return stored
             .Select(a => new ArtifactDescriptor(
                 a.Name,

@@ -19,7 +19,16 @@ Everything is configured by environment variables, so the same image runs unchan
 | `FABRICATE_DATA_PROTECTION_KEYS_PATH` | recommended | Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances; see [Key ring](#key-ring). |
 | `ASPNETCORE_URLS` | no | Defaults to `http://+:8080` in the image. TLS is terminated by your platform. |
 | `FABRICATE_API_RATE_LIMIT_PER_MINUTE` | no | Requests per minute per API key across every authenticated route (default 100). `/healthz` and Swagger are exempt. Exceeding it returns `429` with `Retry-After`. |
-| `FABRICATE_ARTIFACTS_PATH` | no | Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart. Object storage is a tracked follow-up. |
+| `FABRICATE_ARTIFACTS_PATH` | no | Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart, or use object storage (below). |
+| `FABRICATE_ARTIFACT_STORE` | no | `filesystem` (default) or `s3`. See [Artifact storage](#artifact-storage). |
+| `FABRICATE_ARTIFACT_BUCKET` | with `s3` | Bucket generated artifacts are written to. |
+| `FABRICATE_ARTIFACT_S3_ENDPOINT` | for non-AWS | Endpoint URL for MinIO, Cloudflare R2 or Backblaze B2. Unset means AWS. |
+| `FABRICATE_ARTIFACT_S3_REGION` | for AWS | Region. Still required by request signing even where the store ignores it. |
+| `FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE` | for non-AWS | `true` for MinIO and most S3-compatible stores, which do not support virtual-host addressing. |
+| `FABRICATE_ARTIFACT_S3_ACCESS_KEY_SECRET` | no | Secret **name** holding the access key. Omit both key variables to use ambient cloud identity. |
+| `FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET` | no | Secret **name** holding the secret key. |
+| `FABRICATE_ARTIFACT_RETENTION_DAYS` | no | Days to keep generated artifacts. Default `0` keeps them. |
+
 | `FABRICATE_AUDIT_RETENTION_DAYS` | no | Days of audit history to keep. **Default `0` keeps everything**, so an existing deployment never starts deleting on upgrade. Set it and a background sweep purges anything older; see [Audit retention](#audit-retention). |
 | `FABRICATE_AUDIT_SWEEP_MINUTES` | no | How often the retention sweep runs (default 360, six hours). Only read when retention is enabled. |
 | `FABRICATE_AUDIT_PURGE_BATCH_SIZE` | no | Rows deleted per statement (default 1000), so clearing a long backlog does not hold one long write lock. |
@@ -89,6 +98,50 @@ Provider notes:
 Project-bound credential → workspace default for the provider → the workspace's single active credential → the
 platform credential (only where `FABRICATE_LLM_PLATFORM_FALLBACK` allows) → none, in which case the chat returns a
 clear notice and the direct `/tool` commands still work.
+
+
+### Artifact storage
+
+Generated artifacts default to the local file system (`FABRICATE_ARTIFACTS_PATH`, else the OS temp directory).
+That is right for local use and **wrong on every hosted target**: Fly machines are replaced, Cloud Run and
+Container Apps revisions are immutable, ECS tasks restart. The files disappear and a completed run is left
+pointing at artifacts that no longer exist.
+
+Set `FABRICATE_ARTIFACT_STORE=s3` to use object storage instead. One adapter covers **AWS S3, MinIO, Cloudflare
+R2 and Backblaze B2**, because they all speak the same API:
+
+```bash
+# AWS S3, using the task or instance role — no keys stored anywhere
+FABRICATE_ARTIFACT_STORE=s3
+FABRICATE_ARTIFACT_BUCKET=acme-fabricate-artifacts
+FABRICATE_ARTIFACT_S3_REGION=eu-west-1
+
+# MinIO, Cloudflare R2 or Backblaze B2
+FABRICATE_ARTIFACT_STORE=s3
+FABRICATE_ARTIFACT_BUCKET=fabricate-artifacts
+FABRICATE_ARTIFACT_S3_ENDPOINT=https://s3.example.internal
+FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE=true
+FABRICATE_ARTIFACT_S3_ACCESS_KEY_SECRET=ARTIFACT_ACCESS_KEY
+FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET=ARTIFACT_SECRET_KEY
+```
+
+**Credentials.** Ambient cloud identity first — an IAM role on ECS or EKS, or the instance profile — because that
+means no key is stored anywhere at all. The two `*_SECRET` variables are the fallback for stores that have no
+ambient identity, and they hold the *name* of a secret, not its value, so artifact keys follow the same path as
+every other secret. Setting one without the other is refused at startup rather than falling through to ambient
+credentials and failing later with an unrelated permissions error.
+
+The configuration is validated when the container is built, so a mistake stops the instance starting rather than
+being discovered by the first person to generate data.
+
+**Uploads and downloads stream.** Size and SHA-256 are computed as the bytes pass through and stored as object
+metadata, which is what lets the run manifest be served without reading the blobs.
+
+**Retention.** `FABRICATE_ARTIFACT_RETENTION_DAYS` defaults to `0`, keeping everything. A positive value starts a
+sweep that deletes the artifacts of runs older than the window; the run record keeps its checksums — still the
+record of what was produced — but reports an empty artifact manifest rather than paths that no longer resolve.
+Where your object store offers a lifecycle policy, configuring one on the bucket is cheaper than this sweep and
+does the same job; the sweep exists for stores that do not, and for operators who prefer the rule in one place.
 
 ## One command locally
 

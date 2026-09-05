@@ -4,6 +4,7 @@ using Fabricate.Api.Routes;
 using Fabricate.Application.Governance;
 using Fabricate.Application.Llm;
 using Fabricate.Infrastructure.DependencyInjection;
+using Fabricate.Infrastructure.Export;
 using Fabricate.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -121,6 +122,7 @@ builder.Services.AddSingleton(ApiUsageAuditOptions.FromEnvironment(Environment.G
 
 builder.Services.AddHostedService<StartupBootstrapService>();
 builder.Services.AddHostedService<AuditRetentionService>();
+builder.Services.AddHostedService<ArtifactRetentionService>();
 
 var app = builder.Build();
 
