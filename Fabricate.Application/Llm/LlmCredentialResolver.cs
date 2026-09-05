@@ -5,20 +5,59 @@ namespace Fabricate.Application.Llm;
 
 /// <summary>
 /// Decides which credential a chat turn executes under. First match wins:
-/// project-bound → workspace default for the provider → the single active workspace credential →
-/// the operator's platform credential (only where policy allows) → none.
+/// session-bound → owned by the requesting member → project-bound → workspace default for the provider →
+/// the single active workspace credential → the operator's platform credential (only where policy allows) → none.
 /// Callers are responsible for having authorised the user against the workspace already.
 /// </summary>
 public sealed class LlmCredentialResolver(
     ILlmCredentialStore store,
     ISecretCipher cipher,
     ISecretProvider secretProvider,
+    IWorkspaceService workspaceService,
     LlmOptions options) : ILlmCredentialResolver
 {
-    public async Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken cancellationToken = default)
+    public async Task<ResolvedLlmCredential?> ResolveAsync(
+        Guid workspaceId,
+        Guid? projectId,
+        LlmProvider? preferredProvider = null,
+        CancellationToken cancellationToken = default)
+        => await ResolveAsync(workspaceId, projectId, null, null, preferredProvider, cancellationToken).ConfigureAwait(false);
+
+    public async Task<ResolvedLlmCredential?> ResolveAsync(
+        Guid workspaceId,
+        Guid? projectId,
+        Guid? userId,
+        Guid? sessionId,
+        LlmProvider? preferredProvider = null,
+        CancellationToken cancellationToken = default)
     {
         var all = await store.ListByWorkspaceAsync(workspaceId, cancellationToken).ConfigureAwait(false);
         var active = all.Where(c => c.IsActive).ToArray();
+
+        // The personal rungs (#85). Both are gated on the workspace policy and on the owner still having access:
+        // checked at resolve time rather than cleaned up when access is revoked, because access can also be lost
+        // by a group membership changing, and a cleanup that can be missed is not a control.
+        if (userId is not null && await PersonalCredentialsUsableAsync(workspaceId, userId.Value, cancellationToken).ConfigureAwait(false))
+        {
+            var mine = active.Where(c => c.OwnerUserId == userId).ToArray();
+
+            if (sessionId is not null)
+            {
+                var sessionPick = PreferProvider(mine.Where(c => c.SessionId == sessionId), preferredProvider);
+                if (sessionPick is not null)
+                    return LlmCredentialService.ToResolved(sessionPick, cipher, LlmCredentialSource.SessionBound);
+            }
+
+            var workspaceWide = mine.Where(c => c.SessionId is null).ToArray();
+            var userPick = PreferProvider(workspaceWide.Where(c => c.IsDefault), preferredProvider)
+                        ?? PreferProvider(workspaceWide, preferredProvider);
+            if (userPick is not null)
+                return LlmCredentialService.ToResolved(userPick, cipher, LlmCredentialSource.UserOwned);
+        }
+
+        // Below the personal rungs, only shared credentials are eligible. Without this a member's personal key
+        // could be picked up as "the single active workspace credential" and spent by everyone.
+        active = active.Where(c => !c.IsPersonal).ToArray();
 
         if (projectId is not null)
         {
@@ -42,6 +81,19 @@ public sealed class LlmCredentialResolver(
             return await ResolvePlatformAsync(cancellationToken).ConfigureAwait(false);
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether personal credentials may be used here: the workspace policy permits them, and the owner still has
+    /// access to the workspace.
+    /// </summary>
+    private async Task<bool> PersonalCredentialsUsableAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken)
+    {
+        var policy = await store.GetPolicyAsync(workspaceId, cancellationToken).ConfigureAwait(false);
+        if (policy is not null && !policy.AllowPersonalCredentials) return false;
+
+        var role = await workspaceService.GetEffectiveRoleAsync(workspaceId, userId, cancellationToken).ConfigureAwait(false);
+        return role is not null;
     }
 
     private static LlmCredential? PreferProvider(IEnumerable<LlmCredential> candidates, LlmProvider? preferred)

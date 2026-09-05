@@ -811,6 +811,12 @@ public interface IChatCompletionClientFactory
 public interface ILlmCredentialResolver
 {
     Task<Llm.ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves with the requesting member and session in hand, so the personal rungs can apply (#85). The
+    /// shorter overload remains for callers with no user context — they simply never reach those rungs.
+    /// </summary>
+    Task<Llm.ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, Guid? userId, Guid? sessionId, LlmProvider? preferredProvider = null, CancellationToken cancellationToken = default);
 }
 
 public interface ILlmCredentialStore
@@ -835,6 +841,12 @@ public interface ILlmCredentialProbe
     Task<LlmCredentialValidationResult> ProbeAsync(Guid credentialId, Llm.ResolvedLlmCredential credential, CancellationToken cancellationToken = default);
 }
 
+/// <param name="IsPersonal">
+/// Registers the credential to the requesting member rather than to the workspace (#85). A personal credential
+/// needs only workspace membership, not admin — it is the member's own key and their own bill — and only its
+/// owner can read, rotate or use it.
+/// </param>
+/// <param name="SessionId">Binds a personal credential to one chat session. Ignored unless IsPersonal.</param>
 public sealed record RegisterLlmCredentialCommand(
     Guid WorkspaceId,
     Guid? ProjectId,
@@ -845,7 +857,9 @@ public sealed record RegisterLlmCredentialCommand(
     string Model,
     string? Endpoint = null,
     IReadOnlyDictionary<string, string>? NonSecretSettings = null,
-    bool IsDefault = false);
+    bool IsDefault = false,
+    bool IsPersonal = false,
+    Guid? SessionId = null);
 
 public interface ILlmCredentialService
 {
@@ -861,5 +875,5 @@ public interface ILlmCredentialService
     /// Finance workspace throws <see cref="InvalidOperationException"/> and leaves the policy unchanged — the
     /// opt-in is refused, not silently ignored, so an administrator is not left believing it took effect (#83).
     /// </summary>
-    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, long? dailyTokenBudget = null, long? monthlyTokenBudget = null, CancellationToken cancellationToken = default);
+    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, long? dailyTokenBudget = null, long? monthlyTokenBudget = null, bool? allowPersonalCredentials = null, CancellationToken cancellationToken = default);
 }

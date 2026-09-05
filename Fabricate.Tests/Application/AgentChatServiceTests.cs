@@ -124,6 +124,9 @@ public sealed class AgentChatServiceTests
     {
         public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
             => Task.FromResult<ResolvedLlmCredential?>(null);
+
+        public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, Guid? userId, Guid? sessionId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
+            => Task.FromResult<ResolvedLlmCredential?>(null);
     }
 
     private sealed class ThrowingClientFactory : IChatCompletionClientFactory

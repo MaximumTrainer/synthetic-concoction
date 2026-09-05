@@ -407,6 +407,9 @@ public sealed class AgentChatTurnTests
     {
         public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
             => Task.FromResult(credential);
+
+        public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, Guid? userId, Guid? sessionId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
+            => Task.FromResult(credential);
     }
 
     private sealed class RecordingTool(string name) : ITool

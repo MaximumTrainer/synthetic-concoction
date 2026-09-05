@@ -14,7 +14,12 @@ namespace Fabricate.Tests.Integration;
 /// Writing these found the streaming path was not bounded at all: it retained ~3.2 KB per generated row, so a
 /// 300,000-row run held 903 MB. See <see cref="Fabricate.Application.Generation.DeterministicRandomService"/>.
 /// </summary>
+/// <remarks>
+/// In its own non-parallel collection: both the live-heap and the allocated-bytes measurements are process-wide,
+/// so a test allocating on another thread lands in the figures and makes the comparison meaningless.
+/// </remarks>
 [Trait("Category", "Performance")]
+[Collection("MemoryMeasurement")]
 public sealed class StreamingMemoryBudgetTests : IDisposable
 {
     private const int RowsPerTable = 50_000;
@@ -181,3 +186,7 @@ public sealed class StreamingMemoryBudgetTests : IDisposable
             => throw new NotSupportedException("This exporter is streaming-only.");
     }
 }
+
+/// <summary>Memory measurement is process-wide, so these tests must not run alongside anything else.</summary>
+[CollectionDefinition("MemoryMeasurement", DisableParallelization = true)]
+public sealed class MemoryMeasurementCollection;

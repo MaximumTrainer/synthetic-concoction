@@ -244,7 +244,10 @@ public sealed class AgentChatService(
     /// </summary>
     private async IAsyncEnumerable<ChatStreamEvent> RunModelLoopAsync(ChatSession session, ChatMessage userMessage, Guid userId, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var credential = await credentialResolver.ResolveAsync(session.WorkspaceId, session.ProjectId, null, cancellationToken).ConfigureAwait(false);
+        // The requesting user and session are passed so the personal rungs can apply (#85).
+        var credential = await credentialResolver
+            .ResolveAsync(session.WorkspaceId, session.ProjectId, userId, session.Id, null, cancellationToken)
+            .ConfigureAwait(false);
         if (credential is null)
         {
             var notice = await PersistNoticeAsync(session.Id,

@@ -185,6 +185,14 @@ export interface RegisterLlmCredentialRequest {
   projectId?: string;
   nonSecretSettings?: Record<string, string>;
   isDefault?: boolean;
+  /**
+   * Registers the credential to you rather than to the workspace. A personal credential needs only workspace
+   * membership, not admin — it is your key and your bill — and only you can read, rotate or use it. A workspace
+   * admin sees that it exists and can revoke it for offboarding, but never reads it.
+   */
+  isPersonal?: boolean;
+  /** Binds a personal credential to one chat session. Ignored unless `isPersonal`. */
+  sessionId?: string;
 }
 
 /** The redacted projection every read returns. Never contains the secret. */
@@ -206,6 +214,11 @@ export interface LlmCredentialSummary {
   lastValidatedAt: string | null;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /** Set when the credential belongs to one member rather than to the workspace. */
+  ownerUserId: string | null;
+  /** Set when the credential is bound to a single chat session. */
+  sessionId: string | null;
+  isPersonal: boolean;
 }
 
 export interface LlmCredentialValidationResult {
@@ -225,6 +238,8 @@ export interface WorkspaceLlmPolicy {
   dailyTokenBudget: number | null;
   /** Tokens per UTC calendar month, or `null` for no cap. */
   monthlyTokenBudget: number | null;
+  /** Whether members may attach their own credentials to this workspace. */
+  allowPersonalCredentials: boolean;
   /**
    * Whether tool results carrying sampled row values or profiling aggregates may enter a prompt. Defaults to
    * false: schema metadata may leave the instance, the data itself may not until someone opts in.
@@ -272,6 +287,11 @@ export interface SetWorkspaceLlmPolicyRequest {
   dailyTokenBudget?: number;
   /** Tokens per UTC calendar month. Omit to leave unchanged; pass `-1` to clear the cap. */
   monthlyTokenBudget?: number;
+  /**
+   * Whether members may attach their own credentials. Omit to leave unchanged. Setting it to `false` both blocks
+   * new personal credentials and makes existing ones unresolvable immediately.
+   */
+  allowPersonalCredentials?: boolean;
 }
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────

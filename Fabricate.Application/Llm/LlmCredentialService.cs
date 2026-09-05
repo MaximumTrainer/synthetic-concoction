@@ -20,7 +20,24 @@ public sealed class LlmCredentialService(
 {
     public async Task<LlmCredentialSummary> RegisterAsync(RegisterLlmCredentialCommand command, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        var workspace = await RequireRoleAsync(command.WorkspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
+        // A personal credential needs only membership: it is the member's own key and their own bill. A shared
+        // one still needs admin, because it spends the workspace's quota (#85).
+        var workspace = await RequireRoleAsync(
+            command.WorkspaceId,
+            requestingUserId,
+            command.IsPersonal ? WorkspaceRole.Viewer : WorkspaceRole.Admin,
+            cancellationToken).ConfigureAwait(false);
+
+        if (command.IsPersonal)
+        {
+            var policy = await store.GetPolicyAsync(command.WorkspaceId, cancellationToken).ConfigureAwait(false);
+            if (policy is not null && !policy.AllowPersonalCredentials)
+            {
+                throw new InvalidOperationException(
+                    "This workspace does not permit personal LLM credentials. Everything here runs through the " +
+                    "workspace's shared credential; a workspace admin can change that on the LLM policy.");
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(command.Name))
             throw new ArgumentException("Credential name is required.", nameof(command));
@@ -33,9 +50,14 @@ public sealed class LlmCredentialService(
 
         var endpoint = NormaliseEndpoint(command.Provider, command.Endpoint);
 
-        var existing = await store.ListByWorkspaceAsync(command.WorkspaceId, cancellationToken).ConfigureAwait(false);
+        var all = await store.ListByWorkspaceAsync(command.WorkspaceId, cancellationToken).ConfigureAwait(false);
+        var owner = command.IsPersonal ? requestingUserId : (Guid?)null;
+
+        // Names are unique within their own scope. A member naming their key "default" must not collide with
+        // another member's, nor be blocked by the workspace's.
+        var existing = all.Where(c => c.OwnerUserId == owner).ToArray();
         if (existing.Any(c => c.RevokedAt is null && c.Name.Equals(command.Name, StringComparison.OrdinalIgnoreCase)))
-            throw new ArgumentException($"A credential named '{command.Name}' already exists in this workspace.", nameof(command));
+            throw new ArgumentException($"A credential named '{command.Name}' already exists in this scope.", nameof(command));
 
         var secret = command.Secret ?? string.Empty;
         var (cipherText, keyVersion) = cipher.Encrypt(secret);
@@ -57,7 +79,9 @@ public sealed class LlmCredentialService(
             command.IsDefault,
             LlmCredentialStatus.Active,
             DateTimeOffset.UtcNow,
-            requestingUserId);
+            requestingUserId,
+            OwnerUserId: owner,
+            SessionId: command.IsPersonal ? command.SessionId : null);
 
         if (command.IsDefault)
         {
@@ -71,8 +95,9 @@ public sealed class LlmCredentialService(
 
     public async Task<LlmCredentialSummary> RotateAsync(Guid workspaceId, Guid credentialId, string newSecret, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
+        var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Viewer, cancellationToken).ConfigureAwait(false);
         var credential = await GetOwnedOrThrowAsync(workspaceId, credentialId, cancellationToken).ConfigureAwait(false);
+        await RequireCanManageAsync(workspace.Id, credential, requestingUserId, "rotate", cancellationToken).ConfigureAwait(false);
 
         if (credential.Kind == LlmCredentialKind.ApiKey && string.IsNullOrWhiteSpace(newSecret))
             throw new ArgumentException("New secret is required.", nameof(newSecret));
@@ -98,8 +123,19 @@ public sealed class LlmCredentialService(
 
     public async Task RevokeAsync(Guid workspaceId, Guid credentialId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
+        var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Viewer, cancellationToken).ConfigureAwait(false);
         var credential = await GetOwnedOrThrowAsync(workspaceId, credentialId, cancellationToken).ConfigureAwait(false);
+
+        // Revocation is the one management action a workspace admin keeps over a personal credential: offboarding
+        // a member has to be possible without their cooperation. It destroys access rather than granting any.
+        if (credential.IsPersonal && credential.OwnerUserId != requestingUserId)
+        {
+            await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
+        }
+        else if (!credential.IsPersonal)
+        {
+            await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
+        }
 
         var revoked = credential with { Status = LlmCredentialStatus.Revoked, RevokedAt = DateTimeOffset.UtcNow, IsDefault = false };
         await store.SaveAsync(revoked, cancellationToken).ConfigureAwait(false);
@@ -108,15 +144,30 @@ public sealed class LlmCredentialService(
 
     public async Task<IReadOnlyList<LlmCredentialSummary>> ListAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Viewer, cancellationToken).ConfigureAwait(false);
+        var role = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Viewer, cancellationToken).ConfigureAwait(false);
+        var effectiveRole = await workspaceService.GetEffectiveRoleAsync(workspaceId, requestingUserId, cancellationToken).ConfigureAwait(false);
         var credentials = await store.ListByWorkspaceAsync(workspaceId, cancellationToken).ConfigureAwait(false);
-        return credentials.OrderBy(c => c.CreatedAt).Select(c => c.ToSummary()).ToArray();
+        _ = role;
+
+        // Shared credentials and the caller's own, always. Other members' personal credentials only for admins,
+        // and only as the same redacted summary — which carries a fingerprint and last four, never the secret —
+        // so governance can see that a personal key exists without being able to read or use it.
+        var visible = credentials.Where(c =>
+            !c.IsPersonal
+            || c.OwnerUserId == requestingUserId
+            || effectiveRole >= WorkspaceRole.Admin);
+
+        return visible.OrderBy(c => c.CreatedAt).Select(c => c.ToSummary()).ToArray();
     }
 
     public async Task<LlmCredentialValidationResult> ValidateAsync(Guid workspaceId, Guid credentialId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
         var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Viewer, cancellationToken).ConfigureAwait(false);
         var credential = await GetOwnedOrThrowAsync(workspaceId, credentialId, cancellationToken).ConfigureAwait(false);
+
+        // Validation spends the credential — it makes a real provider call — so for a personal credential it
+        // counts as using it and is owner-only. For a shared one it stays open to any member, as before.
+        RequireOwnerIfPersonal(credential, requestingUserId, "validate");
 
         if (credential.RevokedAt is not null)
         {
@@ -151,7 +202,7 @@ public sealed class LlmCredentialService(
             ?? new WorkspaceLlmPolicy(workspaceId, false, DateTimeOffset.MinValue);
     }
 
-    public async Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, long? dailyTokenBudget = null, long? monthlyTokenBudget = null, CancellationToken cancellationToken = default)
+    public async Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, long? dailyTokenBudget = null, long? monthlyTokenBudget = null, bool? allowPersonalCredentials = null, CancellationToken cancellationToken = default)
     {
         var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
 
@@ -180,15 +231,17 @@ public sealed class LlmCredentialService(
         var daily = ResolveBudget(dailyTokenBudget, existing?.DailyTokenBudget);
         var monthly = ResolveBudget(monthlyTokenBudget, existing?.MonthlyTokenBudget);
 
+        var personal = allowPersonalCredentials ?? existing?.AllowPersonalCredentials ?? true;
+
         var policy = await store.SavePolicyAsync(
-            new WorkspaceLlmPolicy(workspaceId, allowPlatformFallback, DateTimeOffset.UtcNow, tools, sampledData, daily, monthly),
+            new WorkspaceLlmPolicy(workspaceId, allowPlatformFallback, DateTimeOffset.UtcNow, tools, sampledData, daily, monthly, personal),
             cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), workspace.AccountId, requestingUserId,
             "llm_policy.updated", "Workspace", workspaceId.ToString(),
             Guid.NewGuid().ToString(), DateTimeOffset.UtcNow,
-            $"allowPlatformFallback={allowPlatformFallback};allowedTools={(tools is null ? "all" : string.Join(",", tools))};allowSampledDataInPrompts={sampledData};dailyTokenBudget={daily?.ToString() ?? "none"};monthlyTokenBudget={monthly?.ToString() ?? "none"}"), cancellationToken).ConfigureAwait(false);
+            $"allowPlatformFallback={allowPlatformFallback};allowedTools={(tools is null ? "all" : string.Join(",", tools))};allowSampledDataInPrompts={sampledData};dailyTokenBudget={daily?.ToString() ?? "none"};monthlyTokenBudget={monthly?.ToString() ?? "none"};allowPersonalCredentials={personal}"), cancellationToken).ConfigureAwait(false);
 
         return policy;
     }
@@ -200,6 +253,41 @@ public sealed class LlmCredentialService(
         < 0 => null,
         _ => requested,
     };
+
+    /// <summary>
+    /// A personal credential may be rotated, validated or otherwise used only by its owner — not by a workspace
+    /// admin (#85). A shared one still requires admin. The message says which, because "not found" here would
+    /// be a lie and "forbidden" without a reason is unactionable.
+    /// </summary>
+    private async Task RequireCanManageAsync(
+        Guid workspaceId,
+        LlmCredential credential,
+        Guid requestingUserId,
+        string action,
+        CancellationToken cancellationToken)
+    {
+        if (credential.IsPersonal)
+        {
+            RequireOwnerIfPersonal(credential, requestingUserId, action);
+            return;
+        }
+
+        await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Refuses anyone but the owner of a personal credential, and says nothing about a shared one — the caller
+    /// has already applied whatever role that action needs.
+    /// </summary>
+    private static void RequireOwnerIfPersonal(LlmCredential credential, Guid requestingUserId, string action)
+    {
+        if (credential.IsPersonal && credential.OwnerUserId != requestingUserId)
+        {
+            throw new UnauthorizedAccessException(
+                $"Only the member who owns a personal credential can {action} it. Workspace admins can see " +
+                "that it exists, and revoke it, but never read or use it.");
+        }
+    }
 
     /// <summary>Decrypts a stored credential into its request-scoped form. Shared with the resolver.</summary>
     internal static ResolvedLlmCredential ToResolved(LlmCredential credential, ISecretCipher cipher, LlmCredentialSource source)

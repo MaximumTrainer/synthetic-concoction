@@ -497,6 +497,9 @@ namespace Fabricate.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("TEXT");
 
@@ -505,6 +508,9 @@ namespace Fabricate.Infrastructure.Persistence.Migrations
 
                     b.Property<long?>("RevokedAt")
                         .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
@@ -982,6 +988,9 @@ namespace Fabricate.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("WorkspaceId")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("AllowPersonalCredentials")
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("AllowPlatformFallback")
                         .HasColumnType("INTEGER");

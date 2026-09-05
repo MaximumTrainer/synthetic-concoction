@@ -149,6 +149,9 @@ public sealed class ChatToolAuditTests
     {
         public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken cancellationToken = default)
             => Task.FromResult<ResolvedLlmCredential?>(null);
+
+        public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, Guid? userId, Guid? sessionId, LlmProvider? preferredProvider = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<ResolvedLlmCredential?>(null);
     }
 
     private sealed class ThrowingFactory : IChatCompletionClientFactory

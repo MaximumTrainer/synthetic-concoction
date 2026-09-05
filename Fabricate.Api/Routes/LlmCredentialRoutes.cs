@@ -24,7 +24,7 @@ public static class LlmCredentialRoutes
         {
             var summary = await service.RegisterAsync(
                 new RegisterLlmCredentialCommand(workspaceId, req.ProjectId, req.Name, req.Provider, req.Kind, req.Secret ?? string.Empty,
-                    req.Model, req.Endpoint, req.NonSecretSettings, req.IsDefault),
+                    req.Model, req.Endpoint, req.NonSecretSettings, req.IsDefault, req.IsPersonal, req.SessionId),
                 ctx.GetUserId(), ct).ConfigureAwait(false);
             return Results.Created($"/workspaces/{workspaceId}/llm-credentials/{summary.Id}", summary);
         }).WithName("RegisterLlmCredential");
@@ -86,7 +86,7 @@ public static class LlmCredentialRoutes
             try
             {
                 return Results.Ok(await service
-                    .SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, req.AllowSampledDataInPrompts, req.DailyTokenBudget, req.MonthlyTokenBudget, ct)
+                    .SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, req.AllowSampledDataInPrompts, req.DailyTokenBudget, req.MonthlyTokenBudget, req.AllowPersonalCredentials, ct)
                     .ConfigureAwait(false));
             }
             catch (InvalidOperationException ex)
@@ -111,7 +111,9 @@ public sealed record RegisterLlmCredentialRequest(
     string? Endpoint = null,
     Guid? ProjectId = null,
     IReadOnlyDictionary<string, string>? NonSecretSettings = null,
-    bool IsDefault = false);
+    bool IsDefault = false,
+    bool IsPersonal = false,
+    Guid? SessionId = null);
 
 public sealed record RotateLlmCredentialRequest(string Secret);
 /// <param name="AllowedTools">Null leaves the tool allowlist unchanged; an empty array offers the model no tools.</param>
@@ -124,4 +126,5 @@ public sealed record SetLlmPolicyRequest(
     IReadOnlyList<string>? AllowedTools = null,
     bool? AllowSampledDataInPrompts = null,
     long? DailyTokenBudget = null,
-    long? MonthlyTokenBudget = null);
+    long? MonthlyTokenBudget = null,
+    bool? AllowPersonalCredentials = null);

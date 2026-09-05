@@ -13,18 +13,31 @@ public sealed class LlmCredentialResolverTests
     private readonly LlmCredentialServiceTests.FakeCipher _cipher = new();
     private readonly DictionarySecretProvider _secrets = new();
     private readonly LlmOptions _options = new();
+    private readonly InMemoryWorkspaceRepository _workspaces = new();
     private readonly Guid _wsId = Guid.NewGuid();
     private readonly Guid _projectId = Guid.NewGuid();
+    private readonly Guid _memberId = Guid.NewGuid();
 
-    private LlmCredentialResolver Resolver => new(_store, _cipher, _secrets, _options);
+    private LlmCredentialResolver Resolver => new(
+        _store, _cipher, _secrets,
+        new Fabricate.Application.Workspaces.WorkspaceService(
+            _workspaces, new InMemoryAccountGroupRepository(),
+            new Fabricate.Application.Governance.AuditLogService(new InMemoryAuditLogRepository(), new InMemoryAccountRepository())),
+        _options);
 
-    private async Task<LlmCredential> AddAsync(string name, string secret, Guid? projectId = null, bool isDefault = false, LlmProvider provider = LlmProvider.Anthropic, bool revoked = false, DateTimeOffset? createdAt = null)
+    /// <summary>Gives the member access to the workspace, which the personal rungs require (#85).</summary>
+    private Task GrantMemberAccessAsync(Guid? userId = null)
+        => _workspaces.SaveMembershipAsync(
+            new WorkspaceMembership(_wsId, userId ?? _memberId, false, WorkspaceRole.Editor, DateTimeOffset.UtcNow));
+
+    private async Task<LlmCredential> AddAsync(string name, string secret, Guid? projectId = null, bool isDefault = false, LlmProvider provider = LlmProvider.Anthropic, bool revoked = false, DateTimeOffset? createdAt = null, Guid? ownerUserId = null, Guid? sessionId = null)
     {
         var (cipherText, keyVersion) = _cipher.Encrypt(secret);
         var credential = new LlmCredential(Guid.NewGuid(), _wsId, projectId, name, provider, LlmCredentialKind.ApiKey, cipherText, keyVersion,
             "fp", secret[^4..], null, "claude-opus-5", new Dictionary<string, string>(), isDefault,
             revoked ? LlmCredentialStatus.Revoked : LlmCredentialStatus.Active,
-            createdAt ?? DateTimeOffset.UtcNow, Guid.NewGuid(), RevokedAt: revoked ? DateTimeOffset.UtcNow : null);
+            createdAt ?? DateTimeOffset.UtcNow, Guid.NewGuid(), RevokedAt: revoked ? DateTimeOffset.UtcNow : null,
+            OwnerUserId: ownerUserId, SessionId: sessionId);
         return await _store.SaveAsync(credential);
     }
 
