@@ -28,4 +28,12 @@ public sealed class EfRunRepository(FabricateDbContext db) : IRunRepository
     public async Task<IReadOnlyList<DatasetRun>> ListAsync(int pageSize = 20, int page = 1, CancellationToken cancellationToken = default)
         => await db.DatasetRuns.OrderByDescending(r => r.CreatedAt)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<DatasetRun>> ListByWorkspaceAsync(Guid workspaceId, int pageSize = 20, int page = 1, CancellationToken cancellationToken = default)
+        => await db.DatasetRuns
+            .Where(r => r.WorkspaceId == workspaceId)
+            .OrderByDescending(r => r.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
 }

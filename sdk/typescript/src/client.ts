@@ -20,6 +20,8 @@ import type {
   ProjectDatabase,
   ProjectDatabaseType,
   RegisterLlmCredentialRequest,
+  RunArtifact,
+  StartRunRequest,
   SetWorkspaceLlmPolicyRequest,
   ToolApprovalResult,
   ToolInvocation,
@@ -158,18 +160,46 @@ export class FabricateClient {
 
   // ─── Runs ────────────────────────────────────────────────────────────────────
 
-  /** One page of runs. The API returns a bare array, not a pagination envelope. */
-  async listRuns(page = 1, pageSize = 20): Promise<DatasetRun[]> {
-    return this.get<DatasetRun[]>(`/runs?page=${page}&pageSize=${pageSize}`);
+  /**
+   * Starts a generation run and returns it once complete, with its checksums and artifact paths. Requires the
+   * workspace Editor role.
+   */
+  async startRun(workspaceId: string, request: StartRunRequest): Promise<DatasetRun> {
+    return this.post<DatasetRun>(`/workspaces/${workspaceId}/runs`, request);
   }
 
-  async getRun(runId: string): Promise<DatasetRun> {
-    return this.get<DatasetRun>(`/runs/${runId}`);
+  /** One page of the workspace's runs. The API returns a bare array, not a pagination envelope. */
+  async listRuns(workspaceId: string, page = 1, pageSize = 20): Promise<DatasetRun[]> {
+    return this.get<DatasetRun[]>(`/workspaces/${workspaceId}/runs?page=${page}&pageSize=${pageSize}`);
+  }
+
+  async getRun(workspaceId: string, runId: string): Promise<DatasetRun> {
+    return this.get<DatasetRun>(`/workspaces/${workspaceId}/runs/${runId}`);
   }
 
   /** Returns the cancelled run. Throws `FabricateError` with status 409 if it is already in a terminal state. */
-  async cancelRun(runId: string): Promise<DatasetRun> {
-    return this.post<DatasetRun>(`/runs/${runId}/cancel`, {});
+  async cancelRun(workspaceId: string, runId: string): Promise<DatasetRun> {
+    return this.post<DatasetRun>(`/workspaces/${workspaceId}/runs/${runId}/cancel`, {});
+  }
+
+  /** The run's artifact manifest: name, size, SHA-256 and content type. */
+  async listArtifacts(workspaceId: string, runId: string): Promise<RunArtifact[]> {
+    return this.get<RunArtifact[]>(`/workspaces/${workspaceId}/runs/${runId}/artifacts`);
+  }
+
+  /**
+   * Downloads one artifact as raw bytes. `name` may carry the exporter directory — `csv/main_users.csv` — so
+   * each segment is encoded separately and the slashes survive as path separators.
+   */
+  async downloadArtifact(workspaceId: string, runId: string, name: string): Promise<ArrayBuffer> {
+    const encoded = name.split("/").map(encodeURIComponent).join("/");
+    const res = await this.fetchFn(
+      `${this.baseUrl}/workspaces/${workspaceId}/runs/${runId}/artifacts/${encoded}`,
+      { method: "GET", headers: this.headers() }
+    );
+
+    if (!res.ok) await this.handleResponse<unknown>(res);
+    return res.arrayBuffer();
   }
 
   /**
@@ -177,13 +207,14 @@ export class FabricateClient {
    * Throws FabricateError if the run fails or is cancelled.
    */
   async pollRun(
+    workspaceId: string,
     runId: string,
     intervalMs = 2000,
     timeoutMs = 300_000
   ): Promise<DatasetRun> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const run = await this.getRun(runId);
+      const run = await this.getRun(workspaceId, runId);
       if (run.status === "Completed") return run;
       if (run.status === "Failed") throw new FabricateError(`Run ${runId} failed`, 0);
       if (run.status === "Cancelled") throw new FabricateError(`Run ${runId} was cancelled`, 0);

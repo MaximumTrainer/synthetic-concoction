@@ -71,7 +71,8 @@ public sealed record DatasetRun(
     IReadOnlyList<string>? ArtifactPaths = null,
     int ValidationIssueCount = 0,
     string? FailureReason = null,
-    Guid? WorkspaceId = null);
+    Guid? WorkspaceId = null,
+    Guid? ProjectId = null);
 
 /// <summary>Manifest capturing full reproducibility and lineage metadata for a completed run.</summary>
 public sealed record RunManifest(

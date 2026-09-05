@@ -134,49 +134,47 @@ Content-Type: application/json
 <p>Soft-delete (archive) a project.</p>
 <p><strong>Response 200:</strong> Returns the archived project with <code>isArchived: true</code>.</p>
 <h2 id="runs">Runs</h2>
-<h3 id="get-runs">GET /runs</h3>
-<p>List dataset runs with pagination.</p>
-<p><strong>Query Parameters:</strong></p>
-<table>
-<thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead>
-<tbody>
-<tr><td><code>page</code></td><td>1</td><td>Page number (1-based)</td></tr>
-<tr><td><code>pageSize</code></td><td>20</td><td>Results per page</td></tr>
-</tbody>
-</table>
-<p><strong>Response 200:</strong></p>
+<p>Runs are <strong>workspace-scoped</strong>. There is no instance-wide <code>/runs</code> route: a run belonging to another workspace is <code>404</code>, never <code>403</code>, because a forbidden response would confirm the id exists.</p>
+<h3 id="post-workspaces-workspaceid-runs">POST /workspaces/{workspaceId}/runs</h3>
+<p>Start a generation run. Requires the workspace <strong>Editor</strong> role. Returns once the run completes.</p>
 <pre><code class="language-json">{
-  &quot;items&quot;: [
-    {
-      &quot;id&quot;: &quot;run-abc123&quot;,
-      &quot;status&quot;: &quot;Completed&quot;,
-      &quot;createdAt&quot;: &quot;2024-06-01T10:00:00Z&quot;,
-      &quot;startedAt&quot;: &quot;2024-06-01T10:00:01Z&quot;,
-      &quot;completedAt&quot;: &quot;2024-06-01T10:00:05Z&quot;,
-      &quot;seed&quot;: 42,
-      &quot;requestedRowCounts&quot;: { &quot;public.users&quot;: 100 }
-    }
-  ],
-  &quot;totalCount&quot;: 1,
-  &quot;page&quot;: 1,
-  &quot;pageSize&quot;: 20
+  &quot;rowCounts&quot;: { &quot;main.users&quot;: 500, &quot;main.orders&quot;: 2000 },
+  &quot;seed&quot;: 4242,
+  &quot;schemaSnapshotId&quot;: &quot;3fa85f64-...&quot;,
+  &quot;projectId&quot;: null,
+  &quot;complianceProfile&quot;: &quot;Default&quot;,
+  &quot;exporters&quot;: [&quot;csv&quot;, &quot;json&quot;]
 }</code></pre>
-<h3 id="get-runs-id">GET /runs/{id}</h3>
-<p>Get a specific run.</p>
-<p><strong>Run Status Values:</strong></p>
 <table>
-<thead><tr><th>Status</th><th>Description</th></tr></thead>
-<tbody>
-<tr><td><code>Queued</code></td><td>Awaiting execution</td></tr>
-<tr><td><code>Running</code></td><td>In progress</td></tr>
-<tr><td><code>Completed</code></td><td>Finished successfully</td></tr>
-<tr><td><code>Failed</code></td><td>Terminated with error</td></tr>
-<tr><td><code>Cancelled</code></td><td>Cancelled before completion</td></tr>
-</tbody>
+  <tr><th>Field</th><th>Default</th><th>Description</th></tr>
+  <tr><td><code>rowCounts</code></td><td>required</td><td>Rows per qualified table name. Every name must exist in the schema, or the request is <code>400</code>.</td></tr>
+  <tr><td><code>seed</code></td><td>required</td><td>The same seed and schema give byte-identical artifacts.</td></tr>
+  <tr><td><code>schemaSnapshotId</code></td><td>none</td><td>Generate from a stored snapshot instead of discovering the source database — this is what makes a run reproducible from stored inputs.</td></tr>
+  <tr><td><code>exporters</code></td><td><code>["csv"]</code></td><td>Formats to write, matching the CLI's default. An unknown name is <code>400</code> and the error lists what is available.</td></tr>
 </table>
-<h3 id="post-runs-id-cancel">POST /runs/{id}/cancel</h3>
-<p>Cancel a queued or running run.</p>
-<p><strong>Response 200:</strong> Returns the updated run. <strong>Response 409:</strong> Run is not in a cancellable state.</p>
+<p><strong>Response 201:</strong> the completed run, including <code>artifactChecksums</code> and <code>validationIssueCount</code>. <strong>400:</strong> unknown table, unknown exporter, or no tables requested. <strong>403:</strong> the caller is not an editor of the workspace.</p>
+<h3 id="get-workspaces-workspaceid-runs">GET /workspaces/{workspaceId}/runs</h3>
+<p>The workspace's runs, newest first. <code>page</code> (default 1) and <code>pageSize</code> (default 20). Returns a bare array.</p>
+<h3 id="get-workspaces-workspaceid-runs-runid">GET /workspaces/{workspaceId}/runs/{runId}</h3>
+<table>
+  <tr><th>Status</th><th>Description</th></tr>
+  <tr><td><code>Queued</code></td><td>Awaiting execution</td></tr>
+  <tr><td><code>Running</code></td><td>In progress</td></tr>
+  <tr><td><code>Completed</code></td><td>Finished successfully</td></tr>
+  <tr><td><code>Failed</code></td><td>Terminated with error; <code>failureReason</code> says why</td></tr>
+  <tr><td><code>Cancelled</code></td><td>Cancelled before completion</td></tr>
+</table>
+<h3 id="post-workspaces-workspaceid-runs-runid-cancel">POST /workspaces/{workspaceId}/runs/{runId}/cancel</h3>
+<p>Cancel a queued or running run. Requires the <strong>Editor</strong> role. <strong>Response 409:</strong> the run is already in a terminal state.</p>
+<h3 id="get-workspaces-workspaceid-runs-runid-artifacts">GET /workspaces/{workspaceId}/runs/{runId}/artifacts</h3>
+<p>The run's manifest.</p>
+<pre><code class="language-json">[
+  { &quot;name&quot;: &quot;csv/main_users.csv&quot;, &quot;sizeBytes&quot;: 4096, &quot;sha256&quot;: &quot;9f3c…&quot;, &quot;contentType&quot;: &quot;text/csv&quot; },
+  { &quot;name&quot;: &quot;summary.json&quot;, &quot;sizeBytes&quot;: 272, &quot;sha256&quot;: &quot;d80d…&quot;, &quot;contentType&quot;: &quot;application/json&quot; }
+]</code></pre>
+<p>The <code>sha256</code> is the checksum recorded when the run completed, not one computed on read — a checksum that always agrees with the file it describes would prove nothing.</p>
+<h3 id="get-workspaces-workspaceid-runs-runid-artifacts-name">GET /workspaces/{workspaceId}/runs/{runId}/artifacts/{name}</h3>
+<p>Streams one artifact with its content type and a download filename. <code>name</code> carries the exporter directory, so it contains slashes: <code>csv/main_users.csv</code>. Range requests are supported.</p>
 <h2 id="workflows">Workflows</h2>
 <h3 id="post-workflows">POST /workflows</h3>
 <p>Create a workflow.</p>

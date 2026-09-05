@@ -122,6 +122,16 @@ public sealed class RunLifecycleServiceTests
             return Task.FromResult<Stream>(new MemoryStream(data));
         }
 
+        public Task<IReadOnlyList<Fabricate.Application.Abstractions.StoredArtifact>> ListAsync(string runId, CancellationToken cancellationToken = default)
+        {
+            IReadOnlyList<Fabricate.Application.Abstractions.StoredArtifact> artifacts = _artifacts
+                .Where(kv => kv.Key.StartsWith(runId + "/", StringComparison.Ordinal))
+                .Select(kv => new Fabricate.Application.Abstractions.StoredArtifact(
+                    kv.Key[(runId.Length + 1)..], kv.Key, kv.Value.LongLength))
+                .ToArray();
+            return Task.FromResult(artifacts);
+        }
+
         public Task<bool> ExistsAsync(string path, CancellationToken cancellationToken = default)
             => Task.FromResult(_artifacts.ContainsKey(path));
     }

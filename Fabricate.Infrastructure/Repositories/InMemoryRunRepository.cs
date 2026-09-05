@@ -29,4 +29,16 @@ public sealed class InMemoryRunRepository : IRunRepository
         var result = _runs.OrderByDescending(r => r.CreatedAt).Skip((page - 1) * pageSize).Take(pageSize).ToArray();
         return Task.FromResult<IReadOnlyList<DatasetRun>>(result);
     }
+
+    public Task<IReadOnlyList<DatasetRun>> ListByWorkspaceAsync(Guid workspaceId, int pageSize = 20, int page = 1, CancellationToken cancellationToken = default)
+    {
+        var result = _runs
+            .Where(r => r.WorkspaceId == workspaceId)
+            .OrderByDescending(r => r.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArray();
+
+        return Task.FromResult<IReadOnlyList<DatasetRun>>(result);
+    }
 }

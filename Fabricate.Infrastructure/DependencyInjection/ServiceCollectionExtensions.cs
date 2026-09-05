@@ -59,6 +59,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISchemaReviewService, SchemaReviewService>();
         services.AddSingleton<IGenerationPlanService, GenerationPlanService>();
         services.AddScoped<RunLifecycleService>();
+        // #66 — starting and reading runs through the API, scoped to a workspace the caller belongs to.
+        services.AddScoped<IRunExecutionService, RunExecutionService>();
 
         // #26 — accounts
         services.AddScoped<IAccountService, AccountService>();

@@ -322,6 +322,9 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
                     b.Property<Guid?>("ProfileSnapshotId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("RequestedRowCounts")
                         .IsRequired()
                         .HasColumnType("text");

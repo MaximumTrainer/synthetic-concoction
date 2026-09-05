@@ -160,31 +160,57 @@ Instructions are versioned; saving appends a version rather than replacing one.
 
 ### Dataset Runs
 
-#### `listRuns(page?: number, pageSize?: number): Promise<DatasetRun[]>`
+#### `listRuns(workspaceId: string, page?: number, pageSize?: number): Promise<DatasetRun[]>`
 
 Returns a bare array — the API does not wrap runs in a pagination envelope. Page defaults to 1, page size to 20.
 
 ```typescript
-const runs = await client.listRuns(1, 20);
+const runs = await client.listRuns(workspace.id, 1, 20);
 console.log(runs.length);
 ```
 
-#### `getRun(runId: string): Promise<DatasetRun>`
+#### `startRun(workspaceId: string, request: StartRunRequest): Promise<DatasetRun>`
+
+Starts a generation run and returns it once complete. Requires the workspace **Editor** role.
 
 ```typescript
-const run = await client.getRun("run-abc123");
+const run = await client.startRun(workspace.id, {
+  rowCounts: { "main.users": 500 },
+  seed: 4242,
+  schemaSnapshotId: snapshot.id,
+  exporters: ["csv", "json"],
+});
+```
+
+#### `listArtifacts(workspaceId: string, runId: string): Promise<RunArtifact[]>`
+
+The run's manifest: `name`, `sizeBytes`, `sha256` and `contentType` per file.
+
+#### `downloadArtifact(workspaceId: string, runId: string, name: string): Promise<ArrayBuffer>`
+
+Downloads one artifact as raw bytes. `name` carries the exporter directory, so it contains slashes.
+
+```typescript
+const artifacts = await client.listArtifacts(workspace.id, run.id);
+const bytes = await client.downloadArtifact(workspace.id, run.id, artifacts[0].name);
+```
+
+#### `getRun(workspaceId: string, runId: string): Promise<DatasetRun>`
+
+```typescript
+const run = await client.getRun(workspace.id, "run-abc123");
 console.log(run.status); // "Queued" | "Running" | "Completed" | "Failed" | "Cancelled"
 ```
 
-#### `cancelRun(runId: string): Promise<DatasetRun>`
+#### `cancelRun(workspaceId: string, runId: string): Promise<DatasetRun>`
 
 Returns the cancelled run. Throws `FabricateError` with `status === 409` if the run already reached a terminal state.
 
 ```typescript
-const cancelled = await client.cancelRun("run-abc123");
+const cancelled = await client.cancelRun(workspace.id, "run-abc123");
 ```
 
-#### `pollRun(runId: string, intervalMs?: number, timeoutMs?: number): Promise<DatasetRun>`
+#### `pollRun(workspaceId: string, runId: string, intervalMs?: number, timeoutMs?: number): Promise<DatasetRun>`
 
 Polls a run every `intervalMs` (default 2 000ms) until it reaches a terminal state.
 
@@ -193,7 +219,7 @@ Polls a run every `intervalMs` (default 2 000ms) until it reaches a terminal sta
 
 ```typescript
 const run = await client.runWorkflow(workspace.id, workflow.id);
-const completed = await client.pollRun(run.id, 3000, 300_000);
+const completed = await client.pollRun(workspace.id, run.id, 3000, 300_000);
 console.log(`Run completed at ${completed.completedAt}`);
 ```
 
@@ -220,7 +246,7 @@ Returns the whole run record, not just an id.
 
 ```typescript
 const run = await client.runWorkflow(workspace.id, workflow.id);
-const completed = await client.pollRun(run.id);
+const completed = await client.pollRun(workspace.id, run.id);
 ```
 
 #### `getWorkflowRun(workspaceId, workflowId, runId): Promise<WorkflowRun>`

@@ -11,8 +11,17 @@ public sealed class FileSystemArtifactStore(string baseDirectory) : IArtifactSto
         var dir = Path.Combine(baseDirectory, runId);
         Directory.CreateDirectory(dir);
 
-        var safeName = Path.GetFileName(name);
-        var path = Path.Combine(dir, safeName);
+        // Names may carry an exporter directory (csv/main_users.csv), so the segments are sanitised individually
+        // rather than flattened — but every segment is still stripped of any traversal.
+        var segments = name.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(Path.GetFileName)
+            .Where(seg => !string.IsNullOrEmpty(seg) && seg != "." && seg != "..")
+            .ToArray();
+
+        if (segments.Length == 0) throw new ArgumentException("Artifact name resolves to nothing.", nameof(name));
+
+        var path = Path.Combine([dir, .. segments!]);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
         await using var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true);
         await content.CopyToAsync(file, cancellationToken).ConfigureAwait(false);
@@ -32,6 +41,23 @@ public sealed class FileSystemArtifactStore(string baseDirectory) : IArtifactSto
 
     public Task<bool> ExistsAsync(string path, CancellationToken cancellationToken = default)
         => Task.FromResult(File.Exists(path));
+
+    public Task<IReadOnlyList<StoredArtifact>> ListAsync(string runId, CancellationToken cancellationToken = default)
+    {
+        var dir = Path.Combine(baseDirectory, Path.GetFileName(runId));
+        if (!Directory.Exists(dir)) return Task.FromResult<IReadOnlyList<StoredArtifact>>([]);
+
+        IReadOnlyList<StoredArtifact> artifacts = Directory
+            .GetFiles(dir, "*", SearchOption.AllDirectories)
+            .Select(f => new StoredArtifact(
+                Path.GetRelativePath(dir, f).Replace('\\', '/'),
+                f,
+                new FileInfo(f).Length))
+            .OrderBy(a => a.Name, StringComparer.Ordinal)
+            .ToArray();
+
+        return Task.FromResult(artifacts);
+    }
 
     /// <summary>Computes a SHA-256 checksum hex string for the file at <paramref name="path"/>.</summary>
     public static async Task<string> ComputeChecksumAsync(string path, CancellationToken cancellationToken = default)

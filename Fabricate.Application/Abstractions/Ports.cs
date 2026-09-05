@@ -195,6 +195,9 @@ public interface IRunRepository
     Task<DatasetRun> UpdateAsync(DatasetRun run, CancellationToken cancellationToken = default);
     Task<DatasetRun?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DatasetRun>> ListAsync(int pageSize = 20, int page = 1, CancellationToken cancellationToken = default);
+
+    /// <summary>One workspace's runs, newest first (#66). The unscoped list above is for the CLI and internals.</summary>
+    Task<IReadOnlyList<DatasetRun>> ListByWorkspaceAsync(Guid workspaceId, int pageSize = 20, int page = 1, CancellationToken cancellationToken = default);
 }
 
 public interface IArtifactStore
@@ -202,6 +205,55 @@ public interface IArtifactStore
     Task<string> StoreAsync(string runId, string name, Stream content, CancellationToken cancellationToken = default);
     Task<Stream> RetrieveAsync(string path, CancellationToken cancellationToken = default);
     Task<bool> ExistsAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>Everything stored for one run, so the API can publish a manifest without walking the store (#66).</summary>
+    Task<IReadOnlyList<StoredArtifact>> ListAsync(string runId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// One stored artifact. <paramref name="Name"/> is what the API addresses it by; <paramref name="Path"/> is the
+/// store's own locator and is never returned to a caller — it would disclose the host's directory layout.
+/// </summary>
+public sealed record StoredArtifact(string Name, string Path, long SizeBytes);
+
+// ── #66: starting runs and reading artifacts through the API ─────────────────
+
+/// <param name="Exporters">
+/// Formats to write. Defaults to csv when empty, matching the CLI's own default.
+/// </param>
+public sealed record StartRunCommand(
+    Guid WorkspaceId,
+    Guid? ProjectId,
+    IReadOnlyDictionary<string, int> RowCounts,
+    long Seed,
+    Guid? SchemaSnapshotId = null,
+    RuleConfiguration? Rules = null,
+    ComplianceProfile ComplianceProfile = ComplianceProfile.Default,
+    IReadOnlyList<string>? Exporters = null);
+
+/// <summary>An artifact as the API describes it: addressable name, size, checksum and media type.</summary>
+public sealed record ArtifactDescriptor(string Name, long SizeBytes, string Sha256, string ContentType);
+
+public interface IRunExecutionService
+{
+    /// <summary>
+    /// Runs a generation end to end and stores its artifacts against the run. Produces the same files and
+    /// summary.json the CLI writes for the same inputs — the CLI and this share the orchestrator and exporters.
+    /// </summary>
+    Task<DatasetRun> StartAsync(StartRunCommand command, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>One workspace's runs. A run in another workspace is not listed and not found.</summary>
+    Task<IReadOnlyList<DatasetRun>> ListAsync(Guid workspaceId, Guid requestingUserId, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default);
+
+    Task<DatasetRun?> GetAsync(Guid workspaceId, Guid runId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    Task<DatasetRun?> CancelAsync(Guid workspaceId, Guid runId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>The run's artifact manifest, or null when the run is not the caller's to see.</summary>
+    Task<IReadOnlyList<ArtifactDescriptor>?> ListArtifactsAsync(Guid workspaceId, Guid runId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Opens one artifact for reading, or null when the run or the artifact is not found.</summary>
+    Task<(Stream Content, ArtifactDescriptor Descriptor)?> OpenArtifactAsync(Guid workspaceId, Guid runId, string name, Guid requestingUserId, CancellationToken cancellationToken = default);
 }
 
 // ── #26: Account foundation ports ────────────────────────────────────────────

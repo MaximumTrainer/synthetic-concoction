@@ -244,62 +244,76 @@ Soft-delete (archive) a project.
 
 ## Runs
 
-### GET /runs
+Runs are **workspace-scoped**. There is no instance-wide `/runs` route: a run belonging to another workspace is
+`404`, never `403`, because a forbidden response would confirm the id exists.
 
-List dataset runs with pagination.
+### POST /workspaces/{workspaceId}/runs
 
-**Query Parameters:**
-
-| Parameter | Default | Description |
-|---|---|---|
-| `page` | 1 | Page number (1-based) |
-| `pageSize` | 20 | Results per page |
-
-**Response 200:**
+Start a generation run. Requires the workspace **Editor** role. Returns once the run completes.
 
 ```json
 {
-  "items": [
-    {
-      "id": "run-abc123",
-      "status": "Completed",
-      "createdAt": "2024-06-01T10:00:00Z",
-      "startedAt": "2024-06-01T10:00:01Z",
-      "completedAt": "2024-06-01T10:00:05Z",
-      "seed": 42,
-      "requestedRowCounts": { "public.users": 100 }
-    }
-  ],
-  "totalCount": 1,
-  "page": 1,
-  "pageSize": 20
+  "rowCounts": { "main.users": 500, "main.orders": 2000 },
+  "seed": 4242,
+  "schemaSnapshotId": "3fa85f64-...",
+  "projectId": null,
+  "complianceProfile": "Default",
+  "exporters": ["csv", "json"]
 }
 ```
 
+| Field | Default | Description |
+|---|---|---|
+| `rowCounts` | required | Rows per qualified table name. Every name must exist in the schema, or the request is `400`. |
+| `seed` | required | The same seed and schema give byte-identical artifacts. |
+| `schemaSnapshotId` | none | Generate from a [stored snapshot](#snapshots) instead of discovering the source database — this is what makes a run reproducible from stored inputs. |
+| `exporters` | `["csv"]` | Formats to write, matching the CLI's default. An unknown name is `400` and the error lists what is available. |
+
+**Response 201:** the completed run, including `artifactChecksums` and `validationIssueCount`.
+**Response 400:** unknown table, unknown exporter, or no tables requested.
+**Response 403:** the caller is not an editor of the workspace.
+
 ---
 
-### GET /runs/{id}
+### GET /workspaces/{workspaceId}/runs
 
-Get a specific run.
+The workspace's runs, newest first. `page` (default 1) and `pageSize` (default 20). Returns a bare array.
 
-**Run Status Values:**
+### GET /workspaces/{workspaceId}/runs/{runId}
 
 | Status | Description |
 |---|---|
 | `Queued` | Awaiting execution |
 | `Running` | In progress |
 | `Completed` | Finished successfully |
-| `Failed` | Terminated with error |
+| `Failed` | Terminated with error; `failureReason` says why |
 | `Cancelled` | Cancelled before completion |
+
+### POST /workspaces/{workspaceId}/runs/{runId}/cancel
+
+Cancel a queued or running run. Requires the **Editor** role.
+**Response 409:** the run is already in a terminal state.
 
 ---
 
-### POST /runs/{id}/cancel
+### GET /workspaces/{workspaceId}/runs/{runId}/artifacts
 
-Cancel a queued or running run.
+The run's manifest.
 
-**Response 200:** Returns the updated run.
-**Response 409:** Run is not in a cancellable state.
+```json
+[
+  { "name": "csv/main_users.csv", "sizeBytes": 4096, "sha256": "9f3c…", "contentType": "text/csv" },
+  { "name": "summary.json", "sizeBytes": 272, "sha256": "d80d…", "contentType": "application/json" }
+]
+```
+
+The `sha256` is the checksum recorded when the run completed, not one computed on read — a checksum that always
+agrees with the file it describes would prove nothing.
+
+### GET /workspaces/{workspaceId}/runs/{runId}/artifacts/{name}
+
+Streams one artifact with its content type and a download filename. `name` carries the exporter directory, so it
+contains slashes: `csv/main_users.csv`. Range requests are supported.
 
 ---
 

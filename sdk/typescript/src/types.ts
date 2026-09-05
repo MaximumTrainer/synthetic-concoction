@@ -61,11 +61,33 @@ export interface DatasetRun {
   schemaSnapshotId: string | null;
   profileSnapshotId: string | null;
   requestedRowCounts: Record<string, number>;
+  projectId: string | null;
   artifactChecksums: Record<string, string> | null;
   artifactPaths: string[] | null;
   validationIssueCount: number;
   failureReason: string | null;
   workspaceId: string | null;
+}
+
+export interface RunArtifact {
+  name: string;
+  sizeBytes: number;
+  /** Lowercase hex SHA-256 recorded when the run completed. */
+  sha256: string;
+  contentType: string;
+}
+
+export interface StartRunRequest {
+  /** Rows to generate per qualified table name, e.g. `{ "main.users": 500 }`. */
+  rowCounts: Record<string, number>;
+  seed: number;
+  projectId?: string | null;
+  /** Generate from a stored schema snapshot instead of discovering the source database. */
+  schemaSnapshotId?: string | null;
+  rules?: unknown;
+  complianceProfile?: ComplianceProfile;
+  /** Formats to write; defaults to `["csv"]`, matching the CLI. */
+  exporters?: string[];
 }
 
 export interface ApiKey {

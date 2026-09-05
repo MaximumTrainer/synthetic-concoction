@@ -159,7 +159,7 @@ test("createApiKey omits the expiry for a key that never expires", async () => {
   assert.deepEqual(calls[0].body, { name: "forever", scopes: ["read"], expiry: null });
 });
 
-test("listRuns returns a bare array and cancelRun returns the run", async () => {
+test("run methods are workspace-scoped, and artifacts are addressable by name", async () => {
   const run: DatasetRun = {
     id: "r1",
     status: "Cancelled",
@@ -170,6 +170,7 @@ test("listRuns returns a bare array and cancelRun returns the run", async () => 
     schemaSnapshotId: null,
     profileSnapshotId: null,
     requestedRowCounts: { "main.users": 100 },
+    projectId: null,
     artifactChecksums: null,
     artifactPaths: null,
     validationIssueCount: 0,
@@ -178,13 +179,36 @@ test("listRuns returns a bare array and cancelRun returns the run", async () => 
   };
   const { client, trace } = recorder((req) => (req.method === "GET" && req.url.includes("?") ? [run] : run));
 
-  const runs = await client.listRuns(2, 50);
-  const cancelled = await client.cancelRun("r1");
+  const runs = await client.listRuns("ws1", 2, 50);
+  const cancelled = await client.cancelRun("ws1", "r1");
+  await client.startRun("ws1", { rowCounts: { "main.users": 100 }, seed: 5150 });
+  await client.getRun("ws1", "r1");
+  await client.listArtifacts("ws1", "r1");
 
-  assert.deepEqual(trace(), ["GET /runs?page=2&pageSize=50", "POST /runs/r1/cancel"]);
+  assert.deepEqual(trace(), [
+    "GET /workspaces/ws1/runs?page=2&pageSize=50",
+    "POST /workspaces/ws1/runs/r1/cancel",
+    "POST /workspaces/ws1/runs",
+    "GET /workspaces/ws1/runs/r1",
+    "GET /workspaces/ws1/runs/r1/artifacts",
+  ]);
   assert.equal(runs.length, 1);
   assert.equal(runs[0].seed, 5150);
   assert.equal(cancelled.status, "Cancelled");
+});
+
+test("downloadArtifact keeps the exporter directory in the path", async () => {
+  const calls: string[] = [];
+  const fetch = (async (input: string | URL | Request) => {
+    calls.push(String(input));
+    return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+  }) as typeof globalThis.fetch;
+  const client = new FabricateClient({ baseUrl: "https://api.test", apiKey: "k", fetch });
+
+  const bytes = await client.downloadArtifact("ws1", "r1", "csv/main_users.csv");
+
+  assert.equal(calls[0], "https://api.test/workspaces/ws1/runs/r1/artifacts/csv/main_users.csv");
+  assert.equal(bytes.byteLength, 3);
 });
 
 test("account and workspace methods keep their routes", async () => {
@@ -220,7 +244,7 @@ test("pollRun stops on a terminal status", async () => {
     return { id: "r1", status: polls < 2 ? "Running" : "Completed" };
   });
 
-  const run = await client.pollRun("r1", 1, 5_000);
+  const run = await client.pollRun("ws1", "r1", 1, 5_000);
 
   assert.equal(run.status, "Completed");
   assert.equal(polls, 2);

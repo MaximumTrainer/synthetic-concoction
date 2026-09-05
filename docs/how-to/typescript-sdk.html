@@ -96,21 +96,35 @@ const project = await client.createProject(workspace.id, &quot;Orders Dataset&qu
 <h4 id="getprojectinstruction-workspaceid-projectid-promise-instructionversion"><code>getProjectInstruction(workspaceId, projectId): Promise&lt;InstructionVersion&gt;</code></h4>
 <p>Instructions are versioned; saving appends a version rather than replacing one.</p>
 <h3 id="dataset-runs">Dataset Runs</h3>
-<h4 id="listruns-page-number-pagesize-number-promise-datasetrun"><code>listRuns(page?: number, pageSize?: number): Promise&lt;DatasetRun[]&gt;</code></h4>
+<h4 id="startrun-workspaceid-string-request-startrunrequest-promise-datasetrun"><code>startRun(workspaceId: string, request: StartRunRequest): Promise&lt;DatasetRun&gt;</code></h4>
+<p>Starts a generation run and returns it once complete. Requires the workspace <strong>Editor</strong> role.</p>
+<pre><code class="language-typescript">const run = await client.startRun(workspace.id, {
+  rowCounts: { &quot;main.users&quot;: 500 },
+  seed: 4242,
+  schemaSnapshotId: snapshot.id,
+  exporters: [&quot;csv&quot;, &quot;json&quot;],
+});</code></pre>
+<h4 id="listartifacts-workspaceid-string-runid-string-promise-runartifact"><code>listArtifacts(workspaceId: string, runId: string): Promise&lt;RunArtifact[]&gt;</code></h4>
+<p>The run's manifest: <code>name</code>, <code>sizeBytes</code>, <code>sha256</code> and <code>contentType</code> per file.</p>
+<h4 id="downloadartifact-workspaceid-string-runid-string-name-string-promise-arraybuffer"><code>downloadArtifact(workspaceId: string, runId: string, name: string): Promise&lt;ArrayBuffer&gt;</code></h4>
+<p>Downloads one artifact as raw bytes. <code>name</code> carries the exporter directory, so it contains slashes.</p>
+<pre><code class="language-typescript">const artifacts = await client.listArtifacts(workspace.id, run.id);
+const bytes = await client.downloadArtifact(workspace.id, run.id, artifacts[0].name);</code></pre>
+<h4 id="listruns-workspaceid-string-page-number-pagesize-number-promise-datasetrun"><code>listRuns(workspaceId: string, page?: number, pageSize?: number): Promise&lt;DatasetRun[]&gt;</code></h4>
 <p>Returns a bare array — the API does not wrap runs in a pagination envelope. Page defaults to 1, page size to 20.</p>
-<pre><code class="language-typescript">const runs = await client.listRuns(1, 20);
+<pre><code class="language-typescript">const runs = await client.listRuns(workspace.id, 1, 20);
 console.log(runs.length);</code></pre>
-<h4 id="getrun-runid-string-promise-datasetrun"><code>getRun(runId: string): Promise&lt;DatasetRun&gt;</code></h4>
-<pre><code class="language-typescript">const run = await client.getRun(&quot;run-abc123&quot;);
+<h4 id="getrun-workspaceid-string-runid-string-promise-datasetrun"><code>getRun(workspaceId: string, runId: string): Promise&lt;DatasetRun&gt;</code></h4>
+<pre><code class="language-typescript">const run = await client.getRun(workspace.id, &quot;run-abc123&quot;);
 console.log(run.status); // &quot;Queued&quot; | &quot;Running&quot; | &quot;Completed&quot; | &quot;Failed&quot; | &quot;Cancelled&quot;</code></pre>
-<h4 id="cancelrun-runid-string-promise-datasetrun"><code>cancelRun(runId: string): Promise&lt;DatasetRun&gt;</code></h4>
+<h4 id="cancelrun-workspaceid-string-runid-string-promise-datasetrun"><code>cancelRun(workspaceId: string, runId: string): Promise&lt;DatasetRun&gt;</code></h4>
 <p>Returns the cancelled run. Throws <code>FabricateError</code> with <code>status === 409</code> if the run already reached a terminal state.</p>
-<pre><code class="language-typescript">const cancelled = await client.cancelRun(&quot;run-abc123&quot;);</code></pre>
-<h4 id="pollrun-runid-string-intervalms-number-timeoutms-number-promise-datasetrun"><code>pollRun(runId: string, intervalMs?: number, timeoutMs?: number): Promise&lt;DatasetRun&gt;</code></h4>
+<pre><code class="language-typescript">const cancelled = await client.cancelRun(workspace.id, &quot;run-abc123&quot;);</code></pre>
+<h4 id="pollrun-runid-string-intervalms-number-timeoutms-number-promise-datasetrun"><code>pollRun(workspaceId: string, runId: string, intervalMs?: number, timeoutMs?: number): Promise&lt;DatasetRun&gt;</code></h4>
 <p>Polls a run every <code>intervalMs</code> (default 2 000ms) until it reaches a terminal state.</p>
 <ul><li>Throws <code>FabricateError</code> if the run fails or is cancelled.</li><li>Throws <code>FabricateError</code> if polling times out (default <code>timeoutMs = 300 000ms</code>).</li></ul>
 <pre><code class="language-typescript">const run = await client.runWorkflow(workspace.id, workflow.id);
-const completed = await client.pollRun(run.id, 3000, 300_000);
+const completed = await client.pollRun(workspace.id, run.id, 3000, 300_000);
 console.log(`Run completed at ${completed.completedAt}`);</code></pre>
 <h3 id="workflows">Workflows</h3>
 <p>Workflows are workspace-scoped, so every workflow method takes the <code>workspaceId</code> first.</p>
@@ -123,7 +137,7 @@ console.log(`Run completed at ${completed.completedAt}`);</code></pre>
 <h4 id="runworkflow-workspaceid-string-workflowid-string-promise-workflowrun"><code>runWorkflow(workspaceId: string, workflowId: string): Promise&lt;WorkflowRun&gt;</code></h4>
 <p>Returns the whole run record, not just an id.</p>
 <pre><code class="language-typescript">const run = await client.runWorkflow(workspace.id, workflow.id);
-const completed = await client.pollRun(run.id);</code></pre>
+const completed = await client.pollRun(workspace.id, run.id);</code></pre>
 <h4 id="getworkflowrun-workspaceid-workflowid-runid-promise-workflowrun"><code>getWorkflowRun(workspaceId, workflowId, runId): Promise&lt;WorkflowRun&gt;</code></h4>
 <h4 id="getworkflowstepruns-workspaceid-workflowid-runid-promise-workflowsteprun"><code>getWorkflowStepRuns(workspaceId, workflowId, runId): Promise&lt;WorkflowStepRun[]&gt;</code></h4>
 <h4 id="disableworkflow-workspaceid-workflowid-promise-workflow"><code>disableWorkflow(workspaceId, workflowId): Promise&lt;Workflow&gt;</code></h4>

@@ -29,7 +29,12 @@ public sealed class ApiAuthenticationTests : IDisposable
         { "GET", $"/workspaces/{Guid.Empty}/webhooks" },
         { "GET", $"/workspaces/{Guid.Empty}/llm-credentials" },
         { "GET", $"/workspaces/{Guid.Empty}/chat/sessions/{Guid.Empty}/messages" },
-        { "GET", "/runs" },
+        // Runs moved under the workspace with #66; there is no instance-wide route any more.
+        { "GET", $"/workspaces/{Guid.Empty}/runs" },
+        { "GET", $"/workspaces/{Guid.Empty}/runs/{Guid.Empty}/artifacts" },
+        { "GET", $"/workspaces/{Guid.Empty}/schema-snapshots" },
+        { "GET", $"/workspaces/{Guid.Empty}/llm-usage" },
+        { "GET", $"/accounts/{BootstrapAccountId}/audit" },
     };
 
     [Theory]
