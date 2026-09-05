@@ -20,38 +20,72 @@ export interface Workspace {
   createdAt: string;
 }
 
+export type ProjectStatus = "Active" | "Archived";
+
 export interface Project {
   id: string;
   workspaceId: string;
   name: string;
-  isArchived: boolean;
+  status: ProjectStatus;
+  createdByUserId: string;
+  createdAt: string;
+  archivedAt: string | null;
+}
+
+export type ProjectDatabaseType = "Local" | "External";
+
+export interface ProjectDatabase {
+  id: string;
+  projectId: string;
+  name: string;
+  type: ProjectDatabaseType;
+  provider: string;
+  status: string;
+  connectionRefId: string | null;
   createdAt: string;
 }
 
+export type RunStatus = "Queued" | "Running" | "Completed" | "Failed" | "Cancelled";
+
 export interface DatasetRun {
   id: string;
-  status: "Queued" | "Running" | "Completed" | "Failed" | "Cancelled";
+  status: RunStatus;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
   seed: number;
+  schemaSnapshotId: string | null;
+  profileSnapshotId: string | null;
   requestedRowCounts: Record<string, number>;
+  artifactChecksums: Record<string, string> | null;
+  artifactPaths: string[] | null;
+  validationIssueCount: number;
+  failureReason: string | null;
+  workspaceId: string | null;
 }
 
 export interface ApiKey {
   id: string;
-  displayName: string;
-  prefix: string;
+  accountId: string;
+  name: string;
   scopes: string[];
-  expiresAt: string | null;
-  isRevoked: boolean;
   createdAt: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  isRevoked: boolean;
+  isExpired: boolean;
+  isActive: boolean;
 }
 
+/** The one response that carries the plaintext secret. It is not returned again. */
 export interface ApiKeyCreateResult {
-  key: ApiKey;
+  id: string;
+  name: string;
   /** Plaintext secret — shown only once. */
   secret: string;
+  scopes: string[];
+  expiresAt: string | null;
 }
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -193,19 +227,55 @@ export interface SetWorkspaceLlmPolicyRequest {
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────
 
+export type WorkflowStatus = "Active" | "Disabled" | "Archived";
+
 export interface Workflow {
   id: string;
   workspaceId: string;
   name: string;
-  isDisabled: boolean;
+  version: number;
+  status: WorkflowStatus;
   createdAt: string;
 }
 
-export interface PaginatedResult<T> {
-  items: T[];
-  totalCount: number;
-  page: number;
-  pageSize: number;
+export interface WorkflowStepInput {
+  stepOrder: number;
+  stepType: string;
+  configuration?: string | null;
+}
+
+export type WorkflowRunStatus = "Queued" | "Running" | "Completed" | "Failed" | "Cancelled";
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  status: WorkflowRunStatus;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  failureReason: string | null;
+}
+
+export interface WorkflowStepRun {
+  id: string;
+  workflowRunId: string;
+  stepId: string;
+  stepOrder: number;
+  status: WorkflowRunStatus;
+  retryCount: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  failureReason: string | null;
+}
+
+export interface InstructionVersion {
+  id: string;
+  workspaceId: string;
+  version: number;
+  content: string;
+  createdByUserId: string;
+  createdAt: string;
+  projectId: string | null;
 }
 
 export interface FabricateClientOptions {

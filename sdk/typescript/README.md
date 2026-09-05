@@ -22,10 +22,10 @@ const client = new FabricateClient({
 const account = await client.createAccount("Acme Corp");
 const workspace = await client.createWorkspace(account.id, "Data Science");
 
-// Create a project and poll a run
+// Create a project, start a workflow and poll its run
 const project = await client.createProject(workspace.id, "Customer Data");
-const { runId } = await client.runWorkflow("wf_xxx");
-const run = await client.pollRun(runId, { timeoutMs: 60_000 });
+const started = await client.runWorkflow(workspace.id, "wf_xxx");
+const run = await client.pollRun(started.id, 2000, 60_000);
 console.log("Run status:", run.status);
 ```
 

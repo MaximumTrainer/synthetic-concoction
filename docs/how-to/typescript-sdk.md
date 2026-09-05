@@ -102,6 +102,8 @@ const workspace = await client.getWorkspace("9a3b2c1d-...");
 
 ### Projects
 
+Projects live inside a workspace, so every project method takes the `workspaceId` first.
+
 #### `createProject(workspaceId: string, name: string): Promise<Project>`
 
 ```typescript
@@ -114,27 +116,57 @@ const project = await client.createProject(workspace.id, "Orders Dataset");
 const projects = await client.listProjects(workspace.id);
 ```
 
-#### `getProject(projectId: string): Promise<Project>`
+#### `getProject(workspaceId: string, projectId: string): Promise<Project>`
 
 ```typescript
-const project = await client.getProject("proj-001");
+const project = await client.getProject(workspace.id, "proj-001");
 ```
 
-#### `archiveProject(projectId: string): Promise<void>`
+#### `renameProject(workspaceId: string, projectId: string, name: string): Promise<Project>`
 
 ```typescript
-await client.archiveProject("proj-001");
+const renamed = await client.renameProject(workspace.id, "proj-001", "Orders (2026)");
 ```
+
+#### `archiveProject(workspaceId: string, projectId: string): Promise<Project>`
+
+Returns the archived project; `status` becomes `"Archived"` and `archivedAt` is set.
+
+```typescript
+const archived = await client.archiveProject(workspace.id, "proj-001");
+```
+
+#### `listProjectDatabases(workspaceId, projectId): Promise<ProjectDatabase[]>`
+
+#### `addProjectDatabase(workspaceId, projectId, { name, type, provider, connectionRefId? }): Promise<ProjectDatabase>`
+
+`type` is `"Local"` or `"External"`.
+
+```typescript
+const database = await client.addProjectDatabase(workspace.id, project.id, {
+  name: "warehouse",
+  type: "External",
+  provider: "postgres",
+});
+```
+
+#### `saveProjectInstruction(workspaceId, projectId, content): Promise<InstructionVersion>`
+
+#### `getProjectInstruction(workspaceId, projectId): Promise<InstructionVersion>`
+
+Instructions are versioned; saving appends a version rather than replacing one.
 
 ---
 
 ### Dataset Runs
 
-#### `listRuns(projectId: string, page?: number, pageSize?: number): Promise<PaginatedResult<DatasetRun>>`
+#### `listRuns(page?: number, pageSize?: number): Promise<DatasetRun[]>`
+
+Returns a bare array — the API does not wrap runs in a pagination envelope. Page defaults to 1, page size to 20.
 
 ```typescript
-const page = await client.listRuns(project.id, 1, 20);
-console.log(page.items.length, page.totalCount);
+const runs = await client.listRuns(1, 20);
+console.log(runs.length);
 ```
 
 #### `getRun(runId: string): Promise<DatasetRun>`
@@ -144,47 +176,60 @@ const run = await client.getRun("run-abc123");
 console.log(run.status); // "Queued" | "Running" | "Completed" | "Failed" | "Cancelled"
 ```
 
-#### `cancelRun(runId: string): Promise<void>`
+#### `cancelRun(runId: string): Promise<DatasetRun>`
+
+Returns the cancelled run. Throws `FabricateError` with `status === 409` if the run already reached a terminal state.
 
 ```typescript
-await client.cancelRun("run-abc123");
+const cancelled = await client.cancelRun("run-abc123");
 ```
 
-#### `pollRun(runId: string, options?: { intervalMs?: number; timeoutMs?: number }): Promise<DatasetRun>`
+#### `pollRun(runId: string, intervalMs?: number, timeoutMs?: number): Promise<DatasetRun>`
 
-Polls a run at `intervalMs` (default 2 000ms) until it reaches a terminal state (`Completed`, `Failed`, `Cancelled`).
+Polls a run every `intervalMs` (default 2 000ms) until it reaches a terminal state.
 
 - Throws `FabricateError` if the run fails or is cancelled.
-- Throws `FabricateError` if polling times out (default `timeoutMs = 120 000ms`).
+- Throws `FabricateError` if polling times out (default `timeoutMs = 300 000ms`).
 
 ```typescript
-const workflowResult = await client.runWorkflow(workflowId);
-const completedRun = await client.pollRun(workflowResult.runId, {
-  intervalMs: 3000,
-  timeoutMs: 300_000,
-});
-console.log(`Run completed at ${completedRun.completedAt}`);
+const run = await client.runWorkflow(workspace.id, workflow.id);
+const completed = await client.pollRun(run.id, 3000, 300_000);
+console.log(`Run completed at ${completed.completedAt}`);
 ```
 
 ---
 
 ### Workflows
 
-#### `createWorkflow(workspaceId: string, name: string, steps: unknown[]): Promise<Workflow>`
+Workflows are workspace-scoped, so every workflow method takes the `workspaceId` first.
+
+#### `createWorkflow(workspaceId: string, name: string, steps: WorkflowStepInput[]): Promise<Workflow>`
+
+Each step is `{ stepOrder, stepType, configuration? }`, where `configuration` is a provider-specific JSON string.
 
 ```typescript
 const workflow = await client.createWorkflow(workspace.id, "Nightly Refresh", [
-  { type: "generate", rows: 500 },
-  { type: "export", format: "sql" },
+  { stepOrder: 1, stepType: "generate", configuration: '{"rows":500}' },
+  { stepOrder: 2, stepType: "export", configuration: '{"format":"sql"}' },
 ]);
 ```
 
-#### `runWorkflow(workflowId: string): Promise<{ runId: string }>`
+#### `runWorkflow(workspaceId: string, workflowId: string): Promise<WorkflowRun>`
+
+Returns the whole run record, not just an id.
 
 ```typescript
-const { runId } = await client.runWorkflow(workflow.id);
-const run = await client.pollRun(runId);
+const run = await client.runWorkflow(workspace.id, workflow.id);
+const completed = await client.pollRun(run.id);
 ```
+
+#### `getWorkflowRun(workspaceId, workflowId, runId): Promise<WorkflowRun>`
+
+#### `getWorkflowStepRuns(workspaceId, workflowId, runId): Promise<WorkflowStepRun[]>`
+
+#### `disableWorkflow(workspaceId, workflowId): Promise<Workflow>`
+
+Sets the workflow's `status` to `"Disabled"`; scheduled runs stop firing.
 
 ---
 
@@ -280,7 +325,10 @@ with a public HTTPS `endpoint`; Bedrock and Vertex use `kind: "CloudIdentity"` w
 
 ### API Keys
 
-#### `createApiKey(accountId, displayName, scopes, expiresAt?): Promise<ApiKeyCreateResult>`
+#### `createApiKey(accountId, name, scopes, expiry?): Promise<ApiKeyCreateResult>`
+
+`expiry` is a *lifetime*, not an instant: `{ days?, hours? }`, sent to the API as a .NET `TimeSpan`. Omit it for
+a key that never expires. The plaintext `secret` is on the result and is never returned again.
 
 ```typescript
 const result = await client.createApiKey(
@@ -298,10 +346,12 @@ console.log(result.secret); // cnc_abc123... — shown once only
 const keys = await client.listApiKeys(account.id);
 ```
 
-#### `revokeApiKey(keyId: string): Promise<void>`
+#### `revokeApiKey(accountId: string, keyId: string): Promise<ApiKey>`
+
+Issues a `DELETE` and returns the revoked key.
 
 ```typescript
-await client.revokeApiKey("3fa85f64-...");
+const revoked = await client.revokeApiKey(account.id, "3fa85f64-...");
 ```
 
 ---
@@ -351,7 +401,6 @@ import type {
   LlmCredentialSummary,
   LlmCredentialValidationResult,
   LlmProvider,
-  PaginatedResult,
   Project,
   RegisterLlmCredentialRequest,
   TokenUsage,
