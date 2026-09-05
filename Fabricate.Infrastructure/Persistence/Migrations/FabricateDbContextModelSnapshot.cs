@@ -159,6 +159,9 @@ namespace Fabricate.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("ActorUserId")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ApiKeyId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CorrelationId")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -181,6 +184,8 @@ namespace Fabricate.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("OccurredAt");
+
+                    b.HasIndex("AccountId", "ApiKeyId");
 
                     b.HasIndex("AccountId", "OccurredAt");
 

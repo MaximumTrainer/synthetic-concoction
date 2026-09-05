@@ -651,7 +651,37 @@ Account-level governance controls:
 GET /accounts/{accountId}/audit?page=1&pageSize=50&action=workspace
 ```
 
-Open to any member of the account. `action` is an optional substring filter. Events come back newest first.
+Open to any member of the account. Events come back newest first.
+
+| Filter | Matches |
+|---|---|
+| `action` | Anywhere in the action name — `action=workspace` finds `workspace.created` and `workspace.access_granted`. |
+| `actionPrefix` | The start of the action name, which selects a whole family: `actionPrefix=chat.` or `actionPrefix=api.`. |
+| `apiKeyId` | Everything one API key did. |
+
+#### What is recorded
+
+| Action | When |
+|---|---|
+| `api.request` | Every authenticated request: which key called which **route template**, with method, status, scopes and duration. Anonymous endpoints (`/healthz`, Swagger) are not recorded. |
+| `chat.tool_invoked` | A tool call ran and succeeded. |
+| `chat.tool_failed` | A tool call ran and threw. |
+| `chat.tool_blocked` | A tool call was refused because the tool is not in the workspace allowlist. |
+| `chat.tool_requested` | A tool call was parked for review (`ReviewRequired` sessions). |
+| `chat.tool_approved` | A parked call was approved; the run that follows is audited separately. |
+
+Two things are recorded deliberately narrowly:
+
+- **Route templates, not paths.** A path carries workspace, project and session identifiers;
+  `/workspaces/{workspaceId}/projects/{projectId}` says which endpoint was called without copying tenant
+  identifiers into a log that is exported and kept for months. Headers, query values and bodies are never recorded.
+- **Tool names, not payloads.** Tool arguments carry whatever the user or the model put in the prompt, and outputs
+  carry query results. Copying either into the account audit log would make it a second, longer-lived copy of the
+  conversation. The invocation id is recorded instead, so the payload stays reachable to anyone with the authority
+  to read it.
+
+`api.request` is on by default and can be sampled or switched off with `FABRICATE_API_USAGE_SAMPLING`; see
+[the self-hosting guide](how-to/self-hosting.md#audit-retention).
 
 #### Exporting the audit log
 

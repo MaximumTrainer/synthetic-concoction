@@ -23,6 +23,7 @@ Everything is configured by environment variables, so the same image runs unchan
 | `FABRICATE_AUDIT_RETENTION_DAYS` | no | Days of audit history to keep. **Default `0` keeps everything**, so an existing deployment never starts deleting on upgrade. Set it and a background sweep purges anything older; see [Audit retention](#audit-retention). |
 | `FABRICATE_AUDIT_SWEEP_MINUTES` | no | How often the retention sweep runs (default 360, six hours). Only read when retention is enabled. |
 | `FABRICATE_AUDIT_PURGE_BATCH_SIZE` | no | Rows deleted per statement (default 1000), so clearing a long backlog does not hold one long write lock. |
+| `FABRICATE_API_USAGE_SAMPLING` | no | Fraction of authenticated requests recorded as `api.request` audit events, 0.0–1.0. Default `1.0` records every request; `0` switches per-request usage auditing off. A busy deployment that wants the signal without the volume can sample — but note a sampled log cannot answer "did this key call that endpoint", only "how often, roughly". |
 
 ### Audit retention
 

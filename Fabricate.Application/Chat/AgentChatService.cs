@@ -15,6 +15,8 @@ public sealed class AgentChatService(
     IChatCompletionClientFactory clientFactory,
     ITokenBudgetEstimator tokenEstimator,
     ILlmCredentialStore policyStore,
+    IAuditLogService auditLog,
+    IWorkspaceRepository workspaceRepository,
     LlmOptions options) : IAgentChatService
 {
     private const string ToolCommandPrefix = "/tool ";
@@ -103,6 +105,8 @@ public sealed class AgentChatService(
         {
             throw new InvalidOperationException($"Tool invocation '{invocationId}' is {invocation.Status}, not Pending.");
         }
+
+        await AuditToolAsync(session, invocation, "chat.tool_approved", requestingUserId, $"approvedBy={requestingUserId}", cancellationToken).ConfigureAwait(false);
 
         var executed = await ExecuteInvocationAsync(session, invocation, requestingUserId, cancellationToken).ConfigureAwait(false);
         await PersistToolMessageAsync(session.Id, executed, cancellationToken).ConfigureAwait(false);
@@ -338,6 +342,7 @@ public sealed class AgentChatService(
                 {
                     // Park the call; the loop resumes from ApproveToolInvocationAsync once every call is decided.
                     await sessionRepository.SaveInvocationAsync(invocation, cancellationToken).ConfigureAwait(false);
+                    await AuditToolAsync(session, invocation, "chat.tool_requested", userId, "mode=ReviewRequired", cancellationToken).ConfigureAwait(false);
                     invocations.Add(invocation);
                     yield return new ChatStreamEvent.ToolCallRequested(invocation);
                     awaitingApproval = true;
@@ -450,7 +455,58 @@ public sealed class AgentChatService(
         }
 
         var completed = running with { OutputJson = outputJson, Status = status, CompletedAt = DateTimeOffset.UtcNow, ErrorMessage = error };
-        return await sessionRepository.SaveInvocationAsync(completed, cancellationToken).ConfigureAwait(false);
+        var saved = await sessionRepository.SaveInvocationAsync(completed, cancellationToken).ConfigureAwait(false);
+
+        // A tool call that the workspace does not allow is a security event, not merely a failure, so it gets its
+        // own action rather than being buried among ordinary errors (#72).
+        await AuditToolAsync(
+            session,
+            saved,
+            tool is null ? "chat.tool_blocked" : status == ToolInvocationStatus.Succeeded ? "chat.tool_invoked" : "chat.tool_failed",
+            userId,
+            tool is null ? "reason=not_allowed_in_workspace" : null,
+            cancellationToken).ConfigureAwait(false);
+
+        return saved;
+    }
+
+    /// <summary>
+    /// Records one tool-call transition against the workspace's account (#72).
+    ///
+    /// <para>
+    /// Deliberately records the tool <em>name</em> and status only — never <see cref="ToolInvocation.InputJson"/>
+    /// or <see cref="ToolInvocation.OutputJson"/>. Tool arguments carry whatever the user or the model put in the
+    /// prompt, and outputs carry query results; copying either into the account audit log would turn a security
+    /// record into a second, longer-lived copy of the conversation. The invocation id is recorded instead, so an
+    /// investigator with the right authority can go and read the invocation itself.
+    /// </para>
+    /// </summary>
+    private async Task AuditToolAsync(
+        ChatSession session,
+        ToolInvocation invocation,
+        string action,
+        Guid actorUserId,
+        string? extraDetails,
+        CancellationToken cancellationToken)
+    {
+        var workspace = await workspaceRepository.GetByIdAsync(session.WorkspaceId, cancellationToken).ConfigureAwait(false);
+        if (workspace is null) return; // Nothing to attribute the event to; the invocation row still records it.
+
+        var details = $"workspace={session.WorkspaceId};session={session.Id};tool={invocation.ToolName};status={invocation.Status}";
+        if (extraDetails is not null) details += ";" + extraDetails;
+
+        await auditLog.RecordAsync(
+            new AuditEvent(
+                Guid.NewGuid(),
+                workspace.AccountId,
+                actorUserId,
+                action,
+                "ToolInvocation",
+                invocation.Id.ToString(),
+                session.Id.ToString("N"),
+                DateTimeOffset.UtcNow,
+                details),
+            cancellationToken).ConfigureAwait(false);
     }
 
     private Task<ChatMessage> PersistToolMessageAsync(Guid sessionId, ToolInvocation invocation, CancellationToken cancellationToken)

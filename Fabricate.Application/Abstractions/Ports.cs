@@ -261,10 +261,28 @@ public interface IAllowedDomainService
 
 public sealed record AuditPage(IReadOnlyList<AuditEvent> Events, int TotalCount, int Page, int PageSize);
 
+/// <summary>
+/// Filters for reading the audit log (#72). <paramref name="Action"/> matches anywhere in the action name;
+/// <paramref name="ActionPrefix"/> anchors at the start, which is what makes a whole family — <c>chat.</c>,
+/// <c>api.</c> — selectable now that per-request usage shares the log with security events.
+/// </summary>
+public sealed record AuditFilter(
+    string? Action = null,
+    string? ActionPrefix = null,
+    Guid? ApiKeyId = null)
+{
+    public static readonly AuditFilter None = new();
+
+    public bool IsEmpty => Action is null && ActionPrefix is null && ApiKeyId is null;
+}
+
 public interface IAuditLogService
 {
     Task RecordAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default);
     Task<AuditPage> QueryAsync(Guid accountId, int page = 1, int pageSize = 50, string? actionFilter = null, CancellationToken cancellationToken = default);
+
+    /// <summary>One page of the audit log under the full filter set (#72).</summary>
+    Task<AuditPage> QueryAsync(Guid accountId, AuditFilter filter, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Streams one account's events, oldest first, for export. Only account owners may export (#74), and every
@@ -288,8 +306,8 @@ public interface IAuditLogService
 public interface IAuditLogRepository
 {
     Task AppendAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<AuditEvent>> QueryAsync(Guid accountId, int skip, int take, string? actionFilter, CancellationToken cancellationToken = default);
-    Task<int> CountAsync(Guid accountId, string? actionFilter, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AuditEvent>> QueryAsync(Guid accountId, AuditFilter filter, int skip, int take, CancellationToken cancellationToken = default);
+    Task<int> CountAsync(Guid accountId, AuditFilter filter, CancellationToken cancellationToken = default);
 
     /// <summary>One account's events in a window, oldest first. Streamed so an export never buffers the log.</summary>
     IAsyncEnumerable<AuditEvent> StreamAsync(

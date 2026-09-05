@@ -17,16 +17,18 @@ public sealed class AgentChatServiceTests
     private readonly WorkspaceService _workspaceService;
     private readonly InstructionVersionService _instructionService;
     private readonly InMemorySessionRepository _sessionRepo = new();
+    private readonly InMemoryWorkspaceRepository _workspaceRepo = new();
     private readonly AgentChatService _chatService;
 
     public AgentChatServiceTests()
     {
         _auditLogService = new AuditLogService(_auditLogRepo, new InMemoryAccountRepository());
-        _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), _auditLogService);
+        _workspaceService = new WorkspaceService(_workspaceRepo, new InMemoryAccountGroupRepository(), _auditLogService);
         _instructionService = new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService);
         _chatService = new AgentChatService(
             _sessionRepo, new NoOpToolRegistry(), _workspaceService, _instructionService,
-            new NoCredentialResolver(), new ThrowingClientFactory(), new HeuristicTokenBudgetEstimator(), new InMemoryLlmCredentialStore(), new LlmOptions());
+            new NoCredentialResolver(), new ThrowingClientFactory(), new HeuristicTokenBudgetEstimator(), new InMemoryLlmCredentialStore(),
+            _auditLogService, _workspaceRepo, new LlmOptions());
     }
 
     private async Task<(Guid workspaceId, Guid adminUserId)> CreateWorkspaceAsync()

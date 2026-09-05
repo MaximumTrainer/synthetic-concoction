@@ -22,10 +22,16 @@ public static class AuditRoutes
             CancellationToken ct,
             int page = 1,
             int pageSize = 50,
-            string? action = null) =>
+            string? action = null,
+            string? actionPrefix = null,
+            Guid? apiKeyId = null) =>
         {
             await accounts.EnsureMemberAsync(accountId, ctx.GetUserId(), ct).ConfigureAwait(false);
-            var result = await auditLog.QueryAsync(accountId, page, pageSize, action, ct).ConfigureAwait(false);
+
+            // actionPrefix and apiKeyId exist because per-request usage now shares this log with security
+            // events (#72): without them, one busy key drowns everything else on the first page.
+            var filter = new AuditFilter(action, actionPrefix, apiKeyId);
+            var result = await auditLog.QueryAsync(accountId, filter, page, pageSize, ct).ConfigureAwait(false);
             return Results.Ok(result);
         }).WithName("QueryAuditLog");
 
@@ -106,7 +112,7 @@ public static class AuditRoutes
     {
         // "\n" explicitly, not Environment.NewLine: the file is data, and its shape must not depend on which
         // operating system produced it.
-        Write(output, "id,accountId,actorUserId,action,targetType,targetId,correlationId,occurredAt,details\n");
+        Write(output, "id,accountId,actorUserId,apiKeyId,action,targetType,targetId,correlationId,occurredAt,details\n");
 
         for (var more = hasFirst; more; more = await events.MoveNextAsync().ConfigureAwait(false))
         {
@@ -116,6 +122,7 @@ public static class AuditRoutes
                 Csv(e.Id.ToString()),
                 Csv(e.AccountId.ToString()),
                 Csv(e.ActorUserId?.ToString()),
+                Csv(e.ApiKeyId?.ToString()),
                 Csv(e.Action),
                 Csv(e.TargetType),
                 Csv(e.TargetId),

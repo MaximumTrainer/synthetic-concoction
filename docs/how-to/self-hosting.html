@@ -37,6 +37,7 @@
 <tr><td><code>FABRICATE_AUDIT_RETENTION_DAYS</code></td><td>no</td><td>Days of audit history to keep. <strong>Default <code>0</code> keeps everything</strong>, so an existing deployment never starts deleting on upgrade. Set it and a background sweep purges anything older; see <a href="#audit-retention">Audit retention</a>.</td></tr>
 <tr><td><code>FABRICATE_AUDIT_SWEEP_MINUTES</code></td><td>no</td><td>How often the retention sweep runs (default 360, six hours). Only read when retention is enabled.</td></tr>
 <tr><td><code>FABRICATE_AUDIT_PURGE_BATCH_SIZE</code></td><td>no</td><td>Rows deleted per statement (default 1000), so clearing a long backlog does not hold one long write lock.</td></tr>
+<tr><td><code>FABRICATE_API_USAGE_SAMPLING</code></td><td>no</td><td>Fraction of authenticated requests recorded as <code>api.request</code> audit events, 0.0–1.0. Default <code>1.0</code> records every request; <code>0</code> switches per-request usage auditing off. A busy deployment that wants the signal without the volume can sample — but note a sampled log cannot answer "did this key call that endpoint", only "how often, roughly".</td></tr>
 </tbody>
 </table>
 <h3 id="audit-retention">Audit retention</h3>

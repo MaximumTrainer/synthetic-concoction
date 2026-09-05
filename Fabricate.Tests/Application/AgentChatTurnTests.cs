@@ -23,11 +23,14 @@ public sealed class AgentChatTurnTests
     private readonly InMemoryLlmCredentialStore _policyStore = new();
     private readonly RecordingTool _echoTool = new("echo");
     private readonly AgentChatService _chat;
+    private readonly InMemoryWorkspaceRepository _workspaceRepo = new();
+    private readonly InMemoryAuditLogRepository _auditRepo = new();
+    private readonly IAuditLogService _audit;
 
     public AgentChatTurnTests()
     {
-        var audit = new AuditLogService(new InMemoryAuditLogRepository(), new InMemoryAccountRepository());
-        _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), audit);
+        _audit = new AuditLogService(_auditRepo, new InMemoryAccountRepository());
+        _workspaceService = new WorkspaceService(_workspaceRepo, new InMemoryAccountGroupRepository(), _audit);
         _instructionService = new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService);
         _toolRegistry.Register(_echoTool);
         _toolRegistry.Register(new RecordingTool("dangerous"));
@@ -36,7 +39,8 @@ public sealed class AgentChatTurnTests
             new Dictionary<string, string>(), LlmCredentialSource.WorkspaceDefault);
 
         _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
-            new FixedResolver(credential), new FixedFactory(_client), _estimator, _policyStore, _options);
+            new FixedResolver(credential), new FixedFactory(_client), _estimator, _policyStore,
+            _audit, _workspaceRepo, _options);
     }
 
     [Fact]
@@ -289,7 +293,8 @@ public sealed class AgentChatTurnTests
     {
         var (_, userId, session) = await CreateSessionAsync();
         var chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
-            new FixedResolver(null), new FixedFactory(_client), _estimator, _policyStore, _options);
+            new FixedResolver(null), new FixedFactory(_client), _estimator, _policyStore,
+            _audit, _workspaceRepo, _options);
 
         var turn = await chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "hello"));
         turn.AssistantMessage!.Content.Should().Contain("No LLM credential is configured");

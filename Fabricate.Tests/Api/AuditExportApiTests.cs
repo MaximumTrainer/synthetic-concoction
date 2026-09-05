@@ -17,6 +17,14 @@ public sealed class AuditExportApiTests
 {
     private static readonly Guid Account = StartupBootstrapService.BootstrapAccountId;
 
+    /// <summary>
+    /// Per-request usage auditing (#72) is off in these fixtures. It writes an api.request event for every
+    /// authenticated call, including the test's own, which would make the exact-content assertions below depend
+    /// on how many requests the test happened to make. Usage auditing has its own tests.
+    /// </summary>
+    private static FabricateApiFactory NewFactory()
+        => new(new Dictionary<string, string?>(StringComparer.Ordinal) { ["FABRICATE_API_USAGE_SAMPLING"] = "0" });
+
     private static async Task SeedAsync(FabricateApiFactory factory, params AuditEvent[] events)
     {
         using var scope = factory.Services.CreateScope();
@@ -30,7 +38,7 @@ public sealed class AuditExportApiTests
     [Fact]
     public async Task ExportStreamsJsonForAnOwner()
     {
-        using var factory = new FabricateApiFactory();
+        using var factory = NewFactory();
         var now = DateTimeOffset.UtcNow;
         await SeedAsync(factory,
             Event("first.event", now.AddMinutes(-10)),
@@ -51,7 +59,7 @@ public sealed class AuditExportApiTests
     [Fact]
     public async Task ExportStreamsCsvWithAHeaderAndQuotedFields()
     {
-        using var factory = new FabricateApiFactory();
+        using var factory = NewFactory();
         await SeedAsync(factory, Event("comma.event", DateTimeOffset.UtcNow.AddMinutes(-1), "note=one,two"));
 
         using var client = factory.CreateAuthenticatedClient();
@@ -61,7 +69,7 @@ public sealed class AuditExportApiTests
         response.Content.Headers.ContentType!.MediaType.Should().Be("text/csv");
 
         var lines = (await response.Content.ReadAsStringAsync()).Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        lines[0].Should().Be("id,accountId,actorUserId,action,targetType,targetId,correlationId,occurredAt,details");
+        lines[0].Should().Be("id,accountId,actorUserId,apiKeyId,action,targetType,targetId,correlationId,occurredAt,details");
         lines.Should().ContainSingle(l => l.Contains("\"comma.event\"", StringComparison.Ordinal));
         lines.Last().Should().Contain("\"note=one,two\"", "a field containing a comma must be quoted, not split");
     }
@@ -69,7 +77,7 @@ public sealed class AuditExportApiTests
     [Fact]
     public async Task ExportRejectsAnUnknownFormat()
     {
-        using var factory = new FabricateApiFactory();
+        using var factory = NewFactory();
         using var client = factory.CreateAuthenticatedClient();
 
         using var response = await client.GetAsync(new Uri($"/accounts/{Account}/audit/export?format=xlsx", UriKind.Relative));
@@ -80,7 +88,7 @@ public sealed class AuditExportApiTests
     [Fact]
     public async Task ExportRequiresAuthentication()
     {
-        using var factory = new FabricateApiFactory();
+        using var factory = NewFactory();
         using var client = factory.CreateClient();
 
         using var response = await client.GetAsync(new Uri($"/accounts/{Account}/audit/export", UriKind.Relative));
@@ -91,7 +99,7 @@ public sealed class AuditExportApiTests
     [Fact]
     public async Task ExportIsRefusedForAnAccountTheCallerDoesNotOwn()
     {
-        using var factory = new FabricateApiFactory();
+        using var factory = NewFactory();
         var otherAccount = Guid.NewGuid();
         await SeedAsync(factory, Event("secret.event", DateTimeOffset.UtcNow, accountId: otherAccount));
 
@@ -106,7 +114,7 @@ public sealed class AuditExportApiTests
     [Fact]
     public async Task ExportOmitsSecretsFingerprintsAndConnectionStrings()
     {
-        using var factory = new FabricateApiFactory();
+        using var factory = NewFactory();
         var now = DateTimeOffset.UtcNow;
         await SeedAsync(factory,
             Event("llm.credential_registered", now.AddMinutes(-3),
@@ -131,7 +139,7 @@ public sealed class AuditExportApiTests
     [Fact]
     public async Task ExportFiltersToTheRequestedWindow()
     {
-        using var factory = new FabricateApiFactory();
+        using var factory = NewFactory();
         var now = DateTimeOffset.UtcNow;
         await SeedAsync(factory,
             Event("in.window", now.AddDays(-2)),
@@ -152,7 +160,7 @@ public sealed class AuditExportApiTests
     [Fact]
     public async Task TheQueryApiReturnsTheSameEventsTheExportDoes()
     {
-        using var factory = new FabricateApiFactory();
+        using var factory = NewFactory();
         var now = DateTimeOffset.UtcNow;
         await SeedAsync(factory, Event("alpha", now.AddMinutes(-2)), Event("beta", now.AddMinutes(-1)));
 

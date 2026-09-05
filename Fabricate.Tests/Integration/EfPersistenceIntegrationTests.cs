@@ -1,3 +1,4 @@
+using Fabricate.Application.Abstractions;
 using Fabricate.Domain.Enums;
 using Fabricate.Domain.Models;
 using Fabricate.Infrastructure.Persistence;
@@ -60,8 +61,8 @@ public sealed class EfPersistenceIntegrationTests : IDisposable
         var evt = new AuditEvent(Guid.NewGuid(), accountId, null, "user.created", "User", "u1", "corr-1", DateTimeOffset.UtcNow);
 
         await repo.AppendAsync(evt);
-        var page = await repo.QueryAsync(accountId, 0, 10, null);
-        var count = await repo.CountAsync(accountId, null);
+        var page = await repo.QueryAsync(accountId, AuditFilter.None, 0, 10);
+        var count = await repo.CountAsync(accountId, AuditFilter.None);
 
         page.Should().ContainSingle();
         count.Should().Be(1);

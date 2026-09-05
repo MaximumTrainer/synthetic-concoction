@@ -27,18 +27,21 @@ public sealed class PromptInjectionTests
     private readonly RecordingTool _dangerous = new("dangerous");
     private readonly EchoingTool _lookup = new("lookup", Injection);
     private readonly AgentChatService _chat;
+    private readonly InMemoryWorkspaceRepository _workspaceRepo = new();
+    private readonly InMemoryAuditLogRepository _auditRepo = new();
 
     public PromptInjectionTests()
     {
-        var audit = new AuditLogService(new InMemoryAuditLogRepository(), new InMemoryAccountRepository());
-        _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), audit);
+        var audit = new AuditLogService(_auditRepo, new InMemoryAccountRepository());
+        _workspaceService = new WorkspaceService(_workspaceRepo, new InMemoryAccountGroupRepository(), audit);
         _toolRegistry.Register(_dangerous);
         _toolRegistry.Register(_lookup);
 
         var credential = new ResolvedLlmCredential(LlmProvider.Anthropic, LlmCredentialKind.ApiKey, "claude-opus-5", "sk-test", null,
             new Dictionary<string, string>(), LlmCredentialSource.WorkspaceDefault);
         _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService),
-            new FixedResolver(credential), new FixedFactory(_client), new HeuristicTokenBudgetEstimator(), _policyStore, new LlmOptions());
+            new FixedResolver(credential), new FixedFactory(_client), new HeuristicTokenBudgetEstimator(), _policyStore,
+            audit, _workspaceRepo, new LlmOptions());
     }
 
     private async Task<(Guid wsId, Guid userId, ChatSession session)> CreateSessionAsync()

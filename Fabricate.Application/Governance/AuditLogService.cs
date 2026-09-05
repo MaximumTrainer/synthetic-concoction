@@ -16,11 +16,14 @@ public sealed class AuditLogService(
     public Task RecordAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default)
         => auditLogRepository.AppendAsync(auditEvent, cancellationToken);
 
-    public async Task<AuditPage> QueryAsync(Guid accountId, int page = 1, int pageSize = 50, string? actionFilter = null, CancellationToken cancellationToken = default)
+    public Task<AuditPage> QueryAsync(Guid accountId, int page = 1, int pageSize = 50, string? actionFilter = null, CancellationToken cancellationToken = default)
+        => QueryAsync(accountId, new AuditFilter(Action: actionFilter), page, pageSize, cancellationToken);
+
+    public async Task<AuditPage> QueryAsync(Guid accountId, AuditFilter filter, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default)
     {
         var skip = (page - 1) * pageSize;
-        var events = await auditLogRepository.QueryAsync(accountId, skip, pageSize, actionFilter, cancellationToken).ConfigureAwait(false);
-        var total = await auditLogRepository.CountAsync(accountId, actionFilter, cancellationToken).ConfigureAwait(false);
+        var events = await auditLogRepository.QueryAsync(accountId, filter, skip, pageSize, cancellationToken).ConfigureAwait(false);
+        var total = await auditLogRepository.CountAsync(accountId, filter, cancellationToken).ConfigureAwait(false);
         return new AuditPage(events, total, page, pageSize);
     }
 

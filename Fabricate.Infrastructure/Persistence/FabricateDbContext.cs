@@ -104,6 +104,9 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
             // Retention sweeps by date across every account, and export reads one account in date order (#74).
             e.HasIndex(a => a.OccurredAt);
             e.HasIndex(a => new { a.AccountId, a.OccurredAt });
+
+            // "Everything this API key did" is a first-class question once per-request usage is audited (#72).
+            e.HasIndex(a => new { a.AccountId, a.ApiKeyId });
         });
 
         // DatasetRun — store JSON collections as strings

@@ -380,7 +380,29 @@ tables:
 </table>
 <h3 id="reading-the-audit-log">Reading the audit log</h3>
 <pre><code class="language-http">GET /accounts/{accountId}/audit?page=1&amp;pageSize=50&amp;action=workspace</code></pre>
-<p>Open to any member of the account. <code>action</code> is an optional substring filter. Events come back newest first.</p>
+<p>Open to any member of the account. Events come back newest first.</p>
+<table>
+  <tr><th>Filter</th><th>Matches</th></tr>
+  <tr><td><code>action</code></td><td>Anywhere in the action name — <code>action=workspace</code> finds <code>workspace.created</code> and <code>workspace.access_granted</code>.</td></tr>
+  <tr><td><code>actionPrefix</code></td><td>The start of the action name, which selects a whole family: <code>actionPrefix=chat.</code> or <code>actionPrefix=api.</code>.</td></tr>
+  <tr><td><code>apiKeyId</code></td><td>Everything one API key did.</td></tr>
+</table>
+<h3 id="what-is-recorded">What is recorded</h3>
+<table>
+  <tr><th>Action</th><th>When</th></tr>
+  <tr><td><code>api.request</code></td><td>Every authenticated request: which key called which <strong>route template</strong>, with method, status, scopes and duration. Anonymous endpoints (<code>/healthz</code>, Swagger) are not recorded.</td></tr>
+  <tr><td><code>chat.tool_invoked</code></td><td>A tool call ran and succeeded.</td></tr>
+  <tr><td><code>chat.tool_failed</code></td><td>A tool call ran and threw.</td></tr>
+  <tr><td><code>chat.tool_blocked</code></td><td>A tool call was refused because the tool is not in the workspace allowlist.</td></tr>
+  <tr><td><code>chat.tool_requested</code></td><td>A tool call was parked for review (<code>ReviewRequired</code> sessions).</td></tr>
+  <tr><td><code>chat.tool_approved</code></td><td>A parked call was approved; the run that follows is audited separately.</td></tr>
+</table>
+<p>Two things are recorded deliberately narrowly:</p>
+<ul>
+<li><strong>Route templates, not paths.</strong> A path carries workspace, project and session identifiers; <code>/workspaces/{workspaceId}/projects/{projectId}</code> says which endpoint was called without copying tenant identifiers into a log that is exported and kept for months. Headers, query values and bodies are never recorded.</li>
+<li><strong>Tool names, not payloads.</strong> Tool arguments carry whatever the user or the model put in the prompt, and outputs carry query results. Copying either into the account audit log would make it a second, longer-lived copy of the conversation. The invocation id is recorded instead, so the payload stays reachable to anyone with the authority to read it.</li>
+</ul>
+<p><code>api.request</code> is on by default and can be sampled or switched off with <code>FABRICATE_API_USAGE_SAMPLING</code>; see <a href="how-to/self-hosting.html#audit-retention">the self-hosting guide</a>.</p>
 <h3 id="exporting-the-audit-log">Exporting the audit log</h3>
 <pre><code class="language-http">GET /accounts/{accountId}/audit/export?from=2026-01-01T00:00:00Z&amp;to=2026-09-01T00:00:00Z&amp;format=json</code></pre>
 <p><strong>Account owners only</strong> — members who can read the log through the query API cannot export it. The response is a download (<code>Content-Disposition: attachment</code>), streamed rather than buffered, so exporting a large account does not depend on it fitting in memory.</p>

@@ -116,6 +116,9 @@ if (!dbProvider.Equals("memory", StringComparison.OrdinalIgnoreCase))
 var auditRetention = AuditRetentionOptions.FromEnvironment(Environment.GetEnvironmentVariable);
 builder.Services.AddSingleton(auditRetention);
 
+// Per-request usage auditing (#72): FABRICATE_API_USAGE_SAMPLING (0.0-1.0, default 1.0 = record every request).
+builder.Services.AddSingleton(ApiUsageAuditOptions.FromEnvironment(Environment.GetEnvironmentVariable));
+
 builder.Services.AddHostedService<StartupBootstrapService>();
 builder.Services.AddHostedService<AuditRetentionService>();
 
@@ -125,6 +128,9 @@ app.UseExceptionHandler();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
+
+// After authentication and routing, so the middleware can see both the API key and the matched route template.
+app.UseMiddleware<ApiUsageAuditMiddleware>();
 
 app.MapOpenApi();
 app.UseSwagger();
