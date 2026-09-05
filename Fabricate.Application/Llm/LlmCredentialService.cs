@@ -151,7 +151,7 @@ public sealed class LlmCredentialService(
             ?? new WorkspaceLlmPolicy(workspaceId, false, DateTimeOffset.MinValue);
     }
 
-    public async Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, CancellationToken cancellationToken = default)
+    public async Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, long? dailyTokenBudget = null, long? monthlyTokenBudget = null, CancellationToken cancellationToken = default)
     {
         var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
 
@@ -175,18 +175,31 @@ public sealed class LlmCredentialService(
             throw new InvalidOperationException(promptDataBoundary.OptInRefusalReason(workspace.ComplianceProfile));
         }
 
+        // A negative value clears the cap. "Omit to leave unchanged" and "send null to clear" cannot both be
+        // expressed by a nullable field, and leaving a budget in place by accident is the worse failure.
+        var daily = ResolveBudget(dailyTokenBudget, existing?.DailyTokenBudget);
+        var monthly = ResolveBudget(monthlyTokenBudget, existing?.MonthlyTokenBudget);
+
         var policy = await store.SavePolicyAsync(
-            new WorkspaceLlmPolicy(workspaceId, allowPlatformFallback, DateTimeOffset.UtcNow, tools, sampledData),
+            new WorkspaceLlmPolicy(workspaceId, allowPlatformFallback, DateTimeOffset.UtcNow, tools, sampledData, daily, monthly),
             cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), workspace.AccountId, requestingUserId,
             "llm_policy.updated", "Workspace", workspaceId.ToString(),
             Guid.NewGuid().ToString(), DateTimeOffset.UtcNow,
-            $"allowPlatformFallback={allowPlatformFallback};allowedTools={(tools is null ? "all" : string.Join(",", tools))};allowSampledDataInPrompts={sampledData}"), cancellationToken).ConfigureAwait(false);
+            $"allowPlatformFallback={allowPlatformFallback};allowedTools={(tools is null ? "all" : string.Join(",", tools))};allowSampledDataInPrompts={sampledData};dailyTokenBudget={daily?.ToString() ?? "none"};monthlyTokenBudget={monthly?.ToString() ?? "none"}"), cancellationToken).ConfigureAwait(false);
 
         return policy;
     }
+
+    /// <summary>Omitted leaves the budget as it was; a negative value clears it; anything else sets it.</summary>
+    private static long? ResolveBudget(long? requested, long? existing) => requested switch
+    {
+        null => existing,
+        < 0 => null,
+        _ => requested,
+    };
 
     /// <summary>Decrypts a stored credential into its request-scoped form. Shared with the resolver.</summary>
     internal static ResolvedLlmCredential ToResolved(LlmCredential credential, ISecretCipher cipher, LlmCredentialSource source)

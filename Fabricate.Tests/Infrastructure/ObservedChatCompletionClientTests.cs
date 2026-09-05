@@ -16,9 +16,16 @@ public sealed class ObservedChatCompletionClientTests
     private readonly CapturingLogger _logger = new();
     private readonly List<TimeSpan> _delays = [];
 
-    private ObservedChatCompletionClient Build(int maxRetries = 2) => new(
+    private readonly RecordingUsage _usage = new();
+    private static readonly Guid Workspace = Guid.NewGuid();
+    private static readonly Guid Credential = Guid.NewGuid();
+
+    private ObservedChatCompletionClient Build(int maxRetries = 2, bool recordUsage = true) => new(
         _inner, _logger, maxRetries, TimeSpan.FromMilliseconds(500),
-        (delay, _) => { _delays.Add(delay); return Task.CompletedTask; });
+        (delay, _) => { _delays.Add(delay); return Task.CompletedTask; },
+        usageRecorder: recordUsage ? _usage : null,
+        callContext: recordUsage ? new LlmCallContext(Workspace, null, null) : null,
+        credentialId: Credential);
 
     private static ChatCompletionRequest Request() => new("claude-opus-5", "system", [LlmMessage.User(Prompt)], [], 64);
 
@@ -177,4 +184,95 @@ public sealed class ObservedChatCompletionClientTests
             Entries.Add((logLevel, formatter(state, exception), pairs));
         }
     }
+
+    // ── #77: usage attribution ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task OneUsageRecordIsWrittenPerAttempt_WithRetriesFlagged()
+    {
+        _inner.Script(Fail(LlmFailureKind.RateLimited), Fail(LlmFailureKind.Transport), Ok("hi"));
+
+        await Build().CompleteAsync(Request());
+
+        _usage.Records.Should().HaveCount(3, "this is the only layer that sees the attempts individually");
+        _usage.Records.Select(r => r.AttemptNumber).Should().Equal([1, 2, 3]);
+        _usage.Records.Select(r => r.Outcome).Should().Equal([
+            LlmCallOutcome.RetriedFailure,
+            LlmCallOutcome.RetriedFailure,
+            LlmCallOutcome.Success,
+        ]);
+
+        var success = _usage.Records[^1];
+        success.WorkspaceId.Should().Be(Workspace);
+        success.CredentialId.Should().Be(Credential);
+        success.Model.Should().Be("claude-opus-5");
+        success.Provider.Should().Be(_inner.ProviderId);
+        success.TotalTokens.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task AFinalFailureIsRecordedAsFailureNotRetriedFailure()
+    {
+        _inner.Script(Fail(LlmFailureKind.Authentication));
+
+        var act = () => Build().CompleteAsync(Request());
+        await act.Should().ThrowAsync<LlmProviderException>();
+
+        _usage.Records.Should().ContainSingle().Which.Outcome.Should().Be(LlmCallOutcome.Failure,
+            "a call that will not be retried is over, and the record should say so");
+    }
+
+    [Fact]
+    public async Task UsageRecordsCarryNoPromptOrCompletionText()
+    {
+        _inner.Script(Ok("the model's answer"));
+
+        await Build().CompleteAsync(Request());
+
+        var serialised = string.Join(" ", _usage.Records.Select(r =>
+            $"{r.Provider}|{r.Model}|{r.InputTokens}|{r.OutputTokens}|{r.Outcome}"));
+        serialised.Should().NotContain("SECRET-PROMPT-CONTENT");
+        serialised.Should().NotContain("the model's answer");
+    }
+
+    [Fact]
+    public async Task NothingIsRecordedWithoutACallContext()
+    {
+        _inner.Script(Ok("hi"));
+
+        await Build(recordUsage: false).CompleteAsync(Request());
+
+        _usage.Records.Should().BeEmpty("without a context there is nothing to attribute the usage to");
+    }
+
+    [Fact]
+    public async Task ARecorderThatThrowsDoesNotFailTheCall()
+    {
+        _inner.Script(Ok("hi"));
+        var client = new ObservedChatCompletionClient(
+            _inner, _logger, 2, TimeSpan.FromMilliseconds(1), (_, _) => Task.CompletedTask,
+            usageRecorder: new ThrowingUsage(), callContext: new LlmCallContext(Workspace), credentialId: null);
+
+        var result = await client.CompleteAsync(Request());
+
+        result.Text.Should().Be("hi", "bookkeeping must never cost the user their answer");
+    }
+
+    private sealed class RecordingUsage : ILlmUsageRecorder
+    {
+        public List<LlmUsageRecord> Records { get; } = [];
+
+        public Task RecordAsync(LlmUsageRecord record, CancellationToken cancellationToken = default)
+        {
+            Records.Add(record);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingUsage : ILlmUsageRecorder
+    {
+        public Task RecordAsync(LlmUsageRecord record, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("usage store is down");
+    }
+
 }

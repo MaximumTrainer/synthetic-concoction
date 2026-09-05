@@ -44,6 +44,7 @@ public static class PersistenceServiceCollectionExtensions
         services.AddScoped<ISessionRepository, EfSessionRepository>();
         services.AddScoped<IApiKeyStore, EfApiKeyStore>();
         services.AddScoped<ILlmCredentialStore, EfLlmCredentialStore>();
+        services.AddScoped<ILlmUsageRepository, EfLlmUsageRepository>();
 
         // #65 — the remaining platform aggregates, previously held in Application service fields.
         services.AddScoped<IWorkspaceRepository, EfWorkspaceRepository>();

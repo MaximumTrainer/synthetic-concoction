@@ -28,7 +28,7 @@ public sealed class AgentChatServiceTests
         _chatService = new AgentChatService(
             _sessionRepo, new NoOpToolRegistry(), _workspaceService, _instructionService,
             new NoCredentialResolver(), new ThrowingClientFactory(), new HeuristicTokenBudgetEstimator(), new InMemoryLlmCredentialStore(),
-            _auditLogService, _workspaceRepo, new PromptDataBoundary(), new LlmOptions());
+            _auditLogService, _workspaceRepo, new PromptDataBoundary(), new UnlimitedUsage(), new LlmOptions());
     }
 
     private async Task<(Guid workspaceId, Guid adminUserId)> CreateWorkspaceAsync()
@@ -128,7 +128,21 @@ public sealed class AgentChatServiceTests
 
     private sealed class ThrowingClientFactory : IChatCompletionClientFactory
     {
-        public IChatCompletionClient Create(ResolvedLlmCredential credential)
+        public IChatCompletionClient Create(ResolvedLlmCredential credential, LlmCallContext? context = null)
             => throw new InvalidOperationException("No client should be created in these tests.");
     }
+
+    /// <summary>No budget configured, so every turn proceeds. #77's enforcement has its own tests.</summary>
+    private sealed class UnlimitedUsage : ILlmUsageService
+    {
+        public Task<LlmUsageSummary> GetWorkspaceUsageAsync(Guid workspaceId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmUsageSummary> GetAccountUsageAsync(Guid accountId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmBudgetVerdict> CheckBudgetAsync(Guid workspaceId, CancellationToken cancellationToken = default)
+            => Task.FromResult(LlmBudgetVerdict.Allowed);
+    }
+
 }

@@ -225,3 +225,17 @@ test("pollRun stops on a terminal status", async () => {
   assert.equal(run.status, "Completed");
   assert.equal(polls, 2);
 });
+
+test("LLM usage methods hit the workspace and account rollups", async () => {
+  const { client, trace } = recorder(() => ({ buckets: [], totalTokens: 0 }));
+
+  await client.getWorkspaceLlmUsage("ws1");
+  await client.getWorkspaceLlmUsage("ws1", { from: "2026-09-01T00:00:00Z", groupBy: "Day" });
+  await client.getAccountLlmUsage("a1", { groupBy: "Credential" });
+
+  assert.deepEqual(trace(), [
+    "GET /workspaces/ws1/llm-usage",
+    "GET /workspaces/ws1/llm-usage?from=2026-09-01T00%3A00%3A00Z&groupBy=Day",
+    "GET /accounts/a1/llm-usage?groupBy=Credential",
+  ]);
+});

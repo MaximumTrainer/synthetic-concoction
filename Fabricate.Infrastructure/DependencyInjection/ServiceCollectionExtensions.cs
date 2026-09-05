@@ -224,6 +224,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISecretCipher, DataProtectionSecretCipher>();
         services.AddSingleton<ILlmCredentialStore, InMemoryLlmCredentialStore>();
 
+        // #77 — usage attribution. Singleton in-memory by default; AddFabricatePersistence swaps in the EF
+        // adapter. The recorder alias lets the client factory depend on the write half alone.
+        services.TryAddSingleton<ILlmUsageRepository, InMemoryLlmUsageRepository>();
+        services.TryAddSingleton<ILlmUsageRecorder, ScopedLlmUsageRecorder>();
+        services.TryAddScoped<ILlmUsageService, LlmUsageService>();
+
         // #83 — the prompt data boundary is stateless policy. Registered here as well as in the core
         // registration because LlmCredentialService, which enforces the opt-in refusal, is registered here.
         services.TryAddSingleton<IPromptDataBoundary, PromptDataBoundary>();

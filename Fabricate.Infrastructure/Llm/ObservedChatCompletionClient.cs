@@ -18,7 +18,10 @@ public sealed class ObservedChatCompletionClient(
     ILogger<ObservedChatCompletionClient> logger,
     int maxRetries,
     TimeSpan baseDelay,
-    Func<TimeSpan, CancellationToken, Task>? delay = null) : IChatCompletionClient
+    Func<TimeSpan, CancellationToken, Task>? delay = null,
+    ILlmUsageRecorder? usageRecorder = null,
+    LlmCallContext? callContext = null,
+    Guid? credentialId = null) : IChatCompletionClient
 {
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? Task.Delay;
 
@@ -34,12 +37,15 @@ public sealed class ObservedChatCompletionClient(
             {
                 var result = await inner.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
                 LogSuccess(request, attempt, watch.Elapsed, result);
+                await RecordAsync(request, attempt, watch.Elapsed, result, willRetry: false).ConfigureAwait(false);
                 return result;
             }
             catch (LlmProviderException ex)
             {
                 LogFailure(request, attempt, watch.Elapsed, ex);
-                if (!ex.IsRetryable || attempt > maxRetries)
+                var willRetry = ex.IsRetryable && attempt <= maxRetries;
+                await RecordAsync(request, attempt, watch.Elapsed, result: null, willRetry).ConfigureAwait(false);
+                if (!willRetry)
                     throw;
                 await _delay(BackoffFor(attempt), cancellationToken).ConfigureAwait(false);
             }
@@ -83,11 +89,14 @@ public sealed class ObservedChatCompletionClient(
             if (failure is null)
             {
                 LogSuccess(request, attempt, watch.Elapsed, final);
+                await RecordAsync(request, attempt, watch.Elapsed, final, willRetry: false).ConfigureAwait(false);
                 yield break;
             }
 
             LogFailure(request, attempt, watch.Elapsed, failure);
-            if (emitted || !failure.IsRetryable || attempt > maxRetries)
+            var willRetry = !emitted && failure.IsRetryable && attempt <= maxRetries;
+            await RecordAsync(request, attempt, watch.Elapsed, result: null, willRetry).ConfigureAwait(false);
+            if (!willRetry)
                 throw failure;
 
             await _delay(BackoffFor(attempt), cancellationToken).ConfigureAwait(false);
@@ -95,6 +104,46 @@ public sealed class ObservedChatCompletionClient(
     }
 
     private TimeSpan BackoffFor(int attempt) => TimeSpan.FromTicks(baseDelay.Ticks * (1L << (attempt - 1)));
+
+    /// <summary>
+    /// Writes one usage record per attempt (#77). This is the only layer that sees the attempts individually —
+    /// the caller sees one call — so a workspace whose calls keep failing and retrying is visible here and
+    /// nowhere else.
+    /// </summary>
+    private async Task RecordAsync(
+        ChatCompletionRequest request,
+        int attempt,
+        TimeSpan latency,
+        ChatCompletionResult? result,
+        bool willRetry)
+    {
+        if (usageRecorder is null || callContext is null) return;
+
+        try
+        {
+            await usageRecorder.RecordAsync(new LlmUsageRecord(
+                Guid.NewGuid(),
+                callContext.WorkspaceId,
+                callContext.ProjectId,
+                callContext.SessionId,
+                credentialId,
+                inner.ProviderId,
+                request.Model,
+                result?.Usage.InputTokens ?? 0,
+                result?.Usage.OutputTokens ?? 0,
+                attempt,
+                (long)latency.TotalMilliseconds,
+                result is not null ? LlmCallOutcome.Success
+                    : willRetry ? LlmCallOutcome.RetriedFailure
+                    : LlmCallOutcome.Failure,
+                DateTimeOffset.UtcNow)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Bookkeeping must never cost the user their answer.
+            logger.LogError(ex, "Failed to record LLM usage for {Provider}/{Model}.", inner.ProviderId, request.Model);
+        }
+    }
 
     private void LogSuccess(ChatCompletionRequest request, int attempt, TimeSpan latency, ChatCompletionResult? result)
         => logger.LogInformation(

@@ -39,7 +39,7 @@ public sealed class PromptDataBoundaryTests
             _sessions, _tools, _workspaces,
             new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaces),
             new NoCredentialResolver(), new ThrowingFactory(), new HeuristicTokenBudgetEstimator(), _policyStore,
-            _audit, _workspaceRepo, new PromptDataBoundary(), new LlmOptions());
+            _audit, _workspaceRepo, new PromptDataBoundary(), new UnlimitedUsage(), new LlmOptions());
     }
 
     private async Task<(Workspace Workspace, Guid UserId, ChatSession Session)> CreateAsync(
@@ -200,7 +200,21 @@ public sealed class PromptDataBoundaryTests
 
     private sealed class ThrowingFactory : IChatCompletionClientFactory
     {
-        public IChatCompletionClient Create(ResolvedLlmCredential credential)
+        public IChatCompletionClient Create(ResolvedLlmCredential credential, LlmCallContext? context = null)
             => throw new InvalidOperationException("No model should be called in these tests.");
     }
+
+    /// <summary>No budget configured, so every turn proceeds. #77's enforcement has its own tests.</summary>
+    private sealed class UnlimitedUsage : ILlmUsageService
+    {
+        public Task<LlmUsageSummary> GetWorkspaceUsageAsync(Guid workspaceId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmUsageSummary> GetAccountUsageAsync(Guid accountId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmBudgetVerdict> CheckBudgetAsync(Guid workspaceId, CancellationToken cancellationToken = default)
+            => Task.FromResult(LlmBudgetVerdict.Allowed);
+    }
+
 }

@@ -799,6 +799,53 @@ payload. See [the self-hosting guide](how-to/self-hosting.md#the-prompt-data-bou
 
 ---
 
+## LLM usage and token budgets
+
+Every provider call is attributed to the workspace, project and session that caused it, and rolled up on demand.
+
+```http
+GET /workspaces/{workspaceId}/llm-usage?from=2026-09-01T00:00:00Z&to=2026-10-01T00:00:00Z&groupBy=model
+GET /accounts/{accountId}/llm-usage?groupBy=credential
+```
+
+The workspace view is open to any workspace member — it is their own consumption, and hiding it from the people
+doing the work is how a budget becomes a surprise. The account rollup spans workspaces the caller may not
+individually belong to, so it is **account owners only**. Both default to the last 30 days.
+
+| `groupBy` | Buckets by |
+|---|---|
+| `model` (default) | Model name. |
+| `credential` | Credential id. Calls made on the operator's platform credential bucket under `platform`, so they are not misattributed to a tenant's key. |
+| `day` | UTC date, `YYYY-MM-DD`. |
+
+Each bucket carries `inputTokens`, `outputTokens`, `totalTokens`, `calls` and `failedCalls`. **Cost is not
+returned** — prices change and differ by platform, so tokens are the unit.
+
+One record is written per provider *attempt*, not per turn. A call that fails and is retried writes a row for each
+try, flagged `RetriedFailure`, so a workspace whose calls keep failing is visible rather than silently slow.
+
+### Budgets
+
+`dailyTokenBudget` and `monthlyTokenBudget` on the workspace LLM policy cap consumption:
+
+```http
+PUT /workspaces/{workspaceId}/llm-credentials/policy
+{
+  "allowPlatformFallback": true,
+  "dailyTokenBudget": 200000,
+  "monthlyTokenBudget": 4000000
+}
+```
+
+Omit a field to leave it unchanged; send `-1` to clear the cap. Workspace admins only.
+
+Once a budget is reached the chat turn returns a `System` notice saying which budget was hit and when it resets,
+**and no provider call is made** — a budget that only reports after the fact is not a budget. The daily budget
+resets at 00:00 UTC and the monthly one at 00:00 UTC on the first of the month. When both are exceeded the daily
+one is reported, because it is the more actionable message.
+
+---
+
 ## Workflows & Skills
 
 Workflows allow you to define multi-step automation sequences that can be triggered on demand.

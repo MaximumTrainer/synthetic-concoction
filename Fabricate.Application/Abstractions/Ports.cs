@@ -276,6 +276,80 @@ public sealed record AuditFilter(
     public bool IsEmpty => Action is null && ActionPrefix is null && ApiKeyId is null;
 }
 
+// ── #77: LLM usage attribution and token budgets ──────────────────────────────
+
+/// <summary>
+/// Identifies the work a provider call belongs to, so the usage record can be attributed. Carried alongside the
+/// credential rather than on it: a credential is shared across sessions, the context is not.
+/// </summary>
+public sealed record LlmCallContext(Guid WorkspaceId, Guid? ProjectId = null, Guid? SessionId = null);
+
+/// <summary>
+/// Writes one usage record per provider attempt. Failures to record must never fail the call — usage accounting
+/// is bookkeeping, and losing a row is better than losing the user's answer.
+/// </summary>
+public interface ILlmUsageRecorder
+{
+    Task RecordAsync(LlmUsageRecord record, CancellationToken cancellationToken = default);
+}
+
+public interface ILlmUsageRepository : ILlmUsageRecorder
+{
+    /// <summary>Rolls up one workspace's usage over a window.</summary>
+    Task<LlmUsageSummary> SummariseWorkspaceAsync(
+        Guid workspaceId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        LlmUsageGrouping groupBy,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Rolls up every workspace in the set — the account-level view.</summary>
+    Task<LlmUsageSummary> SummariseWorkspacesAsync(
+        IReadOnlyCollection<Guid> workspaceIds,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        LlmUsageGrouping groupBy,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Total tokens a workspace consumed in a window; the number budgets are checked against.</summary>
+    Task<long> TotalTokensAsync(
+        Guid workspaceId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ILlmUsageService
+{
+    Task<LlmUsageSummary> GetWorkspaceUsageAsync(
+        Guid workspaceId,
+        Guid requestingUserId,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        LlmUsageGrouping groupBy = LlmUsageGrouping.Model,
+        CancellationToken cancellationToken = default);
+
+    Task<LlmUsageSummary> GetAccountUsageAsync(
+        Guid accountId,
+        Guid requestingUserId,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        LlmUsageGrouping groupBy = LlmUsageGrouping.Model,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether the workspace has room in its daily and monthly budgets. Returns the reason when it does not, for
+    /// the notice the user sees.
+    /// </summary>
+    Task<LlmBudgetVerdict> CheckBudgetAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>The outcome of a budget check. <paramref name="Reason"/> is empty when the call may proceed.</summary>
+public sealed record LlmBudgetVerdict(bool IsWithinBudget, string Reason)
+{
+    public static readonly LlmBudgetVerdict Allowed = new(true, string.Empty);
+}
+
 public interface IAuditLogService
 {
     Task RecordAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default);
@@ -730,7 +804,7 @@ public interface IChatCompletionClient
 /// <summary>Builds a client for a resolved credential. Implemented in Infrastructure; the only place vendor SDKs are referenced.</summary>
 public interface IChatCompletionClientFactory
 {
-    IChatCompletionClient Create(Llm.ResolvedLlmCredential credential);
+    IChatCompletionClient Create(Llm.ResolvedLlmCredential credential, LlmCallContext? context = null);
 }
 
 /// <summary>Resolves which credential a chat turn executes under. Returns <c>null</c> when none is configured.</summary>
@@ -787,5 +861,5 @@ public interface ILlmCredentialService
     /// Finance workspace throws <see cref="InvalidOperationException"/> and leaves the policy unchanged — the
     /// opt-in is refused, not silently ignored, so an administrator is not left believing it took effect (#83).
     /// </summary>
-    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, CancellationToken cancellationToken = default);
+    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, long? dailyTokenBudget = null, long? monthlyTokenBudget = null, CancellationToken cancellationToken = default);
 }

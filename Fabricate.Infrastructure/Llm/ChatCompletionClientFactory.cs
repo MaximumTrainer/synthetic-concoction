@@ -15,17 +15,26 @@ namespace Fabricate.Infrastructure.Llm;
 /// <see cref="ObservedChatCompletionClient"/>, which owns logging and retry; the SDKs' own retries are disabled so
 /// a failure is retried by exactly one layer.
 /// </summary>
-public sealed class ChatCompletionClientFactory(IHttpClientFactory httpClientFactory, ILoggerFactory loggerFactory, LlmOptions options) : IChatCompletionClientFactory
+public sealed class ChatCompletionClientFactory(
+    IHttpClientFactory httpClientFactory,
+    ILoggerFactory loggerFactory,
+    LlmOptions options,
+    ILlmUsageRecorder? usageRecorder = null) : IChatCompletionClientFactory
 {
     public const string HttpClientName = "fabricate-llm";
     private static readonly TimeSpan BaseRetryDelay = TimeSpan.FromMilliseconds(500);
 
-    public IChatCompletionClient Create(ResolvedLlmCredential credential)
+    public IChatCompletionClient Create(ResolvedLlmCredential credential, LlmCallContext? context = null)
         => new ObservedChatCompletionClient(
             CreateRaw(credential),
             loggerFactory.CreateLogger<ObservedChatCompletionClient>(),
             options.MaxRetries,
-            BaseRetryDelay);
+            BaseRetryDelay,
+            delay: null,
+            // Without a context there is nothing to attribute the usage to, so nothing is recorded.
+            usageRecorder: context is null ? null : usageRecorder,
+            callContext: context,
+            credentialId: credential.CredentialId);
 
     private IChatCompletionClient CreateRaw(ResolvedLlmCredential credential)
     {

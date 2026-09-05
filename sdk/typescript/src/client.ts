@@ -13,6 +13,8 @@ import type {
   DatasetRun,
   InstructionVersion,
   LlmCredentialSummary,
+  LlmUsageGrouping,
+  LlmUsageSummary,
   LlmCredentialValidationResult,
   Project,
   ProjectDatabase,
@@ -393,6 +395,29 @@ export class FabricateClient {
     );
   }
 
+  // ─── LLM usage ────────────────────────────────────────────────────────────────
+
+  /**
+   * Token usage for one workspace. Open to any workspace member — it is their own consumption, and hiding it
+   * from the people doing the work is how a budget becomes a surprise. Defaults to the last 30 days.
+   *
+   * Cost is deliberately not returned: prices change and differ by platform, so tokens are the unit.
+   */
+  async getWorkspaceLlmUsage(
+    workspaceId: string,
+    options: { from?: string; to?: string; groupBy?: LlmUsageGrouping } = {}
+  ): Promise<LlmUsageSummary> {
+    return this.get<LlmUsageSummary>(`/workspaces/${workspaceId}/llm-usage` + usageQuery(options));
+  }
+
+  /** The same rollup across every workspace in an account. Account owners only. */
+  async getAccountLlmUsage(
+    accountId: string,
+    options: { from?: string; to?: string; groupBy?: LlmUsageGrouping } = {}
+  ): Promise<LlmUsageSummary> {
+    return this.get<LlmUsageSummary>(`/accounts/${accountId}/llm-usage` + usageQuery(options));
+  }
+
   // ─── API Keys ─────────────────────────────────────────────────────────────────
 
   /**
@@ -540,6 +565,15 @@ function parseBlock(block: string): { event: string; data: unknown } | null {
   } catch {
     return { event, data: raw };
   }
+}
+
+function usageQuery({ from, to, groupBy }: { from?: string; to?: string; groupBy?: LlmUsageGrouping }): string {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  if (groupBy) params.set("groupBy", groupBy);
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 /** Formats a lifetime as the .NET TimeSpan string the API binds (`d.hh:mm:ss`). */

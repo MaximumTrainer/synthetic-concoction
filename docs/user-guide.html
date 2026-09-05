@@ -452,6 +452,29 @@ tables:
 </table>
 <p>The opt-in is <code>allowSampledDataInPrompts</code> on the workspace LLM policy and defaults to false. It <strong>cannot be enabled on a <code>Healthcare</code> or <code>Finance</code> workspace</strong>: the request is refused with <code>409</code> and the policy is left unchanged. Every refusal is audited as <code>llm.boundary_blocked</code> with the tool name and content class, never the payload. See <a href="how-to/self-hosting.html#the-prompt-data-boundary">the self-hosting guide</a>.</p>
 
+<h2 id="llm-usage-and-token-budgets">LLM usage and token budgets</h2>
+<p>Every provider call is attributed to the workspace, project and session that caused it, and rolled up on demand.</p>
+<pre><code class="language-http">GET /workspaces/{workspaceId}/llm-usage?from=2026-09-01T00:00:00Z&amp;to=2026-10-01T00:00:00Z&amp;groupBy=model
+GET /accounts/{accountId}/llm-usage?groupBy=credential</code></pre>
+<p>The workspace view is open to any workspace member — it is their own consumption, and hiding it from the people doing the work is how a budget becomes a surprise. The account rollup spans workspaces the caller may not individually belong to, so it is <strong>account owners only</strong>. Both default to the last 30 days.</p>
+<table>
+  <tr><th><code>groupBy</code></th><th>Buckets by</th></tr>
+  <tr><td><code>model</code> (default)</td><td>Model name.</td></tr>
+  <tr><td><code>credential</code></td><td>Credential id. Calls made on the operator's platform credential bucket under <code>platform</code>, so they are not misattributed to a tenant's key.</td></tr>
+  <tr><td><code>day</code></td><td>UTC date, <code>YYYY-MM-DD</code>.</td></tr>
+</table>
+<p>Each bucket carries <code>inputTokens</code>, <code>outputTokens</code>, <code>totalTokens</code>, <code>calls</code> and <code>failedCalls</code>. <strong>Cost is not returned</strong> — prices change and differ by platform, so tokens are the unit.</p>
+<p>One record is written per provider <em>attempt</em>, not per turn. A call that fails and is retried writes a row for each try, flagged <code>RetriedFailure</code>, so a workspace whose calls keep failing is visible rather than silently slow.</p>
+<h3 id="budgets">Budgets</h3>
+<p><code>dailyTokenBudget</code> and <code>monthlyTokenBudget</code> on the workspace LLM policy cap consumption:</p>
+<pre><code class="language-http">PUT /workspaces/{workspaceId}/llm-credentials/policy
+{
+  "allowPlatformFallback": true,
+  "dailyTokenBudget": 200000,
+  "monthlyTokenBudget": 4000000
+}</code></pre>
+<p>Omit a field to leave it unchanged; send <code>-1</code> to clear the cap. Workspace admins only.</p>
+<p>Once a budget is reached the chat turn returns a <code>System</code> notice saying which budget was hit and when it resets, <strong>and no provider call is made</strong> — a budget that only reports after the fact is not a budget. The daily budget resets at 00:00 UTC and the monthly one at 00:00 UTC on the first of the month. When both are exceeded the daily one is reported, because it is the more actionable message.</p>
 <h2 id="workflows">12. Workflows &amp; Skills</h2>
 <p>Workflows define multi-step automation sequences triggered on demand via <code>POST /workflows/{id}/run</code>.</p>
 <p>The custom skill registry supports OpenAPI contract ingestion — import an external API spec to expose its operations as callable workflow steps.</p>

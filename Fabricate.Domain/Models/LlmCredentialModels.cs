@@ -72,6 +72,11 @@ public sealed record LlmCredentialSummary(
 /// Per-workspace agent policy: whether the operator's platform credential may be used, and which tools the model
 /// may be offered. <see cref="AllowedTools"/> null means every registered tool; an empty list means none.
 /// </summary>
+/// <param name="DailyTokenBudget">
+/// Tokens the workspace may consume between UTC midnights, or null for no daily cap (#77). Once exceeded the chat
+/// returns a notice and makes no provider call — a budget that only warns is not a budget.
+/// </param>
+/// <param name="MonthlyTokenBudget">Tokens for the current UTC calendar month, or null for no monthly cap.</param>
 /// <param name="AllowSampledDataInPrompts">
 /// Whether tool results carrying sampled row values or profiling aggregates may enter a prompt (#83). Defaults to
 /// false: schema metadata may leave the instance, the data itself may not until someone with authority says so.
@@ -82,7 +87,9 @@ public sealed record WorkspaceLlmPolicy(
     bool AllowPlatformFallback,
     DateTimeOffset UpdatedAt,
     IReadOnlyList<string>? AllowedTools = null,
-    bool AllowSampledDataInPrompts = false);
+    bool AllowSampledDataInPrompts = false,
+    long? DailyTokenBudget = null,
+    long? MonthlyTokenBudget = null);
 
 public sealed record LlmCredentialValidationResult(
     Guid CredentialId,

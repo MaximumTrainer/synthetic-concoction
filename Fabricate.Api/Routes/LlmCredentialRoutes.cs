@@ -86,7 +86,7 @@ public static class LlmCredentialRoutes
             try
             {
                 return Results.Ok(await service
-                    .SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, req.AllowSampledDataInPrompts, ct)
+                    .SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, req.AllowSampledDataInPrompts, req.DailyTokenBudget, req.MonthlyTokenBudget, ct)
                     .ConfigureAwait(false));
             }
             catch (InvalidOperationException ex)
@@ -115,7 +115,13 @@ public sealed record RegisterLlmCredentialRequest(
 
 public sealed record RotateLlmCredentialRequest(string Secret);
 /// <param name="AllowedTools">Null leaves the tool allowlist unchanged; an empty array offers the model no tools.</param>
+/// <param name="DailyTokenBudget">
+/// Tokens per UTC day, or <c>-1</c> to clear the cap. Omit to leave unchanged (#77).
+/// </param>
+/// <param name="MonthlyTokenBudget">Tokens per UTC calendar month, or <c>-1</c> to clear. Omit to leave unchanged.</param>
 public sealed record SetLlmPolicyRequest(
     bool AllowPlatformFallback,
     IReadOnlyList<string>? AllowedTools = null,
-    bool? AllowSampledDataInPrompts = null);
+    bool? AllowSampledDataInPrompts = null,
+    long? DailyTokenBudget = null,
+    long? MonthlyTokenBudget = null);

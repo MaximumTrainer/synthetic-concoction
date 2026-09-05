@@ -528,6 +528,59 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
                     b.ToTable("LlmCredentials");
                 });
 
+            modelBuilder.Entity("Fabricate.Domain.Models.LlmUsageRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CredentialId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("InputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("LatencyMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("OccurredAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("OutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId", "OccurredAt");
+
+                    b.ToTable("LlmUsageRecords");
+                });
+
             modelBuilder.Entity("Fabricate.Domain.Models.Project", b =>
                 {
                     b.Property<Guid>("Id")
@@ -943,6 +996,12 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
 
                     b.Property<string>("AllowedTools")
                         .HasColumnType("text");
+
+                    b.Property<long?>("DailyTokenBudget")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("MonthlyTokenBudget")
+                        .HasColumnType("bigint");
 
                     b.Property<long>("UpdatedAt")
                         .HasColumnType("bigint");

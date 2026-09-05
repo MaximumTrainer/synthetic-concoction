@@ -221,11 +221,42 @@ export interface WorkspaceLlmPolicy {
   updatedAt: string;
   /** `null` means every registered tool; an empty array means none. */
   allowedTools: string[] | null;
+  /** Tokens per UTC day, or `null` for no cap. Over budget, chat returns a notice and calls no provider. */
+  dailyTokenBudget: number | null;
+  /** Tokens per UTC calendar month, or `null` for no cap. */
+  monthlyTokenBudget: number | null;
   /**
    * Whether tool results carrying sampled row values or profiling aggregates may enter a prompt. Defaults to
    * false: schema metadata may leave the instance, the data itself may not until someone opts in.
    */
   allowSampledDataInPrompts: boolean;
+}
+
+export type LlmUsageGrouping = "Model" | "Credential" | "Day";
+
+/**
+ * One row of a usage rollup. `key` is a model name, a credential id (or `"platform"` for calls made on the
+ * operator's own credential), or a `YYYY-MM-DD` UTC date, depending on the grouping requested.
+ */
+export interface LlmUsageBucket {
+  key: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  calls: number;
+  failedCalls: number;
+}
+
+export interface LlmUsageSummary {
+  from: string;
+  to: string;
+  groupBy: LlmUsageGrouping;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  calls: number;
+  failedCalls: number;
+  buckets: LlmUsageBucket[];
 }
 
 export interface SetWorkspaceLlmPolicyRequest {
@@ -237,6 +268,10 @@ export interface SetWorkspaceLlmPolicyRequest {
    * HTTP 409 and leaves the policy untouched — the answer is fixed by the compliance profile, not per workspace.
    */
   allowSampledDataInPrompts?: boolean;
+  /** Tokens per UTC day. Omit to leave unchanged; pass `-1` to clear the cap. */
+  dailyTokenBudget?: number;
+  /** Tokens per UTC calendar month. Omit to leave unchanged; pass `-1` to clear the cap. */
+  monthlyTokenBudget?: number;
 }
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────

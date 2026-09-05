@@ -18,6 +18,7 @@ public sealed class AgentChatService(
     IAuditLogService auditLog,
     IWorkspaceRepository workspaceRepository,
     IPromptDataBoundary promptDataBoundary,
+    ILlmUsageService usageService,
     LlmOptions options) : IAgentChatService
 {
     private const string ToolCommandPrefix = "/tool ";
@@ -255,7 +256,20 @@ public sealed class AgentChatService(
             yield break;
         }
 
-        var client = clientFactory.Create(credential);
+        // Checked before the client is built, so an over-budget workspace makes no provider call at all — a
+        // budget that only reports after the fact is not a budget (#77).
+        var budget = await usageService.CheckBudgetAsync(session.WorkspaceId, cancellationToken).ConfigureAwait(false);
+        if (!budget.IsWithinBudget)
+        {
+            var notice = await PersistNoticeAsync(session.Id, budget.Reason, cancellationToken).ConfigureAwait(false);
+            yield return new ChatStreamEvent.Notice(notice.Content);
+            yield return new ChatStreamEvent.Completed(new ChatTurnResult(userMessage, notice, [], TokenUsage.Zero, null));
+            yield break;
+        }
+
+        var client = clientFactory.Create(
+            credential,
+            new LlmCallContext(session.WorkspaceId, session.ProjectId, session.Id));
         var allowedTools = await GetAllowedToolsAsync(session.WorkspaceId, cancellationToken).ConfigureAwait(false);
         var toolDefinitions = client.Capabilities.SupportsToolCalling
             ? allowedTools.Select(toolRegistry.Resolve).Where(t => t is not null)

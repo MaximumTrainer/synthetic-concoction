@@ -23,6 +23,7 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<LlmCredential> LlmCredentials => Set<LlmCredential>();
     public DbSet<WorkspaceLlmPolicy> WorkspaceLlmPolicies => Set<WorkspaceLlmPolicy>();
+    public DbSet<LlmUsageRecord> LlmUsageRecords => Set<LlmUsageRecord>();
 
     // #65 — platform aggregates that previously lived in service fields
     public DbSet<Workspace> Workspaces => Set<Workspace>();
@@ -107,6 +108,18 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
 
             // "Everything this API key did" is a first-class question once per-request usage is audited (#72).
             e.HasIndex(a => new { a.AccountId, a.ApiKeyId });
+        });
+
+        // LlmUsageRecord — one row per provider attempt (#77), read back by workspace over a time window.
+        modelBuilder.Entity<LlmUsageRecord>(e =>
+        {
+            e.HasKey(u => u.Id);
+            e.Property(u => u.Provider).IsRequired().HasMaxLength(100);
+            e.Property(u => u.Model).IsRequired().HasMaxLength(200);
+            e.Ignore(u => u.TotalTokens);
+
+            // Every query is "this workspace, this window" — usage rollups and the pre-turn budget check alike.
+            e.HasIndex(u => new { u.WorkspaceId, u.OccurredAt });
         });
 
         // DatasetRun — store JSON collections as strings
