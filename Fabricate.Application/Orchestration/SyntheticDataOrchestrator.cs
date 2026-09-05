@@ -33,8 +33,15 @@ public sealed class SyntheticDataOrchestrator(
         var tableCount = 0;
         var totalRows = 0;
 
-        foreach (var tableName in plan.OrderedTables)
+        // A key pool is only worth building while some table still to be generated references it. Retaining every
+        // table's pool for the whole run (including leaf tables nothing references) makes a streaming run hold
+        // memory proportional to the total row count for no benefit — see #82.
+        var ordered = plan.OrderedTables;
+        var referencedBy = BuildReferenceIndex(request.Schema);
+
+        for (var position = 0; position < ordered.Count; position++)
         {
+            var tableName = ordered[position];
             cancellationToken.ThrowIfCancellationRequested();
             var table = request.Schema.Tables.First(t => string.Equals(t.QualifiedName, tableName, StringComparison.Ordinal));
 
@@ -50,7 +57,13 @@ public sealed class SyntheticDataOrchestrator(
 
             await exporter.BeginTableAsync(table, target, cancellationToken).ConfigureAwait(false);
 
-            var pkBuffer = new List<IReadOnlyDictionary<string, object?>>();
+            // Only a table referenced by itself or by a table not yet generated needs its keys kept.
+            var needsKeyPool = table.PrimaryKey.Count > 0
+                && referencedBy.TryGetValue(table.QualifiedName, out var referrers)
+                && referrers.Any(r => string.Equals(r, tableName, StringComparison.Ordinal)
+                    || ordered.Skip(position + 1).Contains(r, StringComparer.Ordinal));
+
+            var pkBuffer = needsKeyPool ? new List<IReadOnlyDictionary<string, object?>>() : null;
 
             await foreach (var row in streamer.StreamAsync(table, rowCount, request.Rules, keyPool, cancellationToken).ConfigureAwait(false))
             {
@@ -79,22 +92,46 @@ public sealed class SyntheticDataOrchestrator(
                 await exporter.WriteRowAsync(finalRow, cancellationToken).ConfigureAwait(false);
                 totalRows++;
 
-                if (table.PrimaryKey.Count > 0)
-                {
-                    pkBuffer.Add(table.PrimaryKey
-                        .ToDictionary(col => col, col => row.TryGetValue(col, out var v) ? v : null, StringComparer.OrdinalIgnoreCase));
-                }
+                pkBuffer?.Add(table.PrimaryKey
+                    .ToDictionary(col => col, col => row.TryGetValue(col, out var v) ? v : null, StringComparer.OrdinalIgnoreCase));
             }
 
             await exporter.EndTableAsync(cancellationToken).ConfigureAwait(false);
             tableCount++;
 
-            if (table.PrimaryKey.Count > 0)
-                keyPool[table.QualifiedName] = pkBuffer;
+            if (pkBuffer is not null) keyPool[table.QualifiedName] = pkBuffer;
+
+            // Release the pools of tables that nothing still to come references.
+            foreach (var pooled in keyPool.Keys.ToArray())
+            {
+                var stillNeeded = referencedBy.TryGetValue(pooled, out var users)
+                    && users.Any(r => ordered.Skip(position + 1).Contains(r, StringComparer.Ordinal));
+                if (!stillNeeded) keyPool.Remove(pooled);
+            }
         }
 
         return new RunSummary(startedAt, DateTimeOffset.UtcNow, tableCount, totalRows, 0, plan.Diagnostics,
             request.Seed, request.Schema.Name, request.ComplianceProfile);
+    }
+
+    /// <summary>Maps each referenced table to the tables holding a foreign key into it (including self-references).</summary>
+    private static Dictionary<string, List<string>> BuildReferenceIndex(DatabaseSchema schema)
+    {
+        var index = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var table in schema.Tables)
+        {
+            foreach (var fk in table.ForeignKeys)
+            {
+                if (!index.TryGetValue(fk.ReferencedTable, out var referrers))
+                {
+                    referrers = [];
+                    index[fk.ReferencedTable] = referrers;
+                }
+                if (!referrers.Contains(table.QualifiedName, StringComparer.Ordinal))
+                    referrers.Add(table.QualifiedName);
+            }
+        }
+        return index;
     }
 
     public async Task<(GenerationResult Result, RunSummary Summary)> GenerateAsync(GenerationRequest request, CancellationToken cancellationToken = default)

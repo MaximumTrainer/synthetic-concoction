@@ -1,14 +1,23 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Fabricate.Application.Abstractions;
 
 namespace Fabricate.Application.Generation;
 
+/// <summary>
+/// Derives values from (seed, scope). A scope names a <em>value</em>, not a stream: drawing the same scope twice
+/// yields the same result, so generation does not depend on evaluation order or on how many times a scope was
+/// touched before. Callers that need several values derive several scopes (<c>scope + ".tld"</c>, and so on).
+/// </summary>
+/// <remarks>
+/// This previously memoised one <see cref="Random"/> per scope in a ConcurrentDictionary. Because generation
+/// scopes embed the row index, that cache grew by one entry per column per row and was never released — roughly
+/// 3.2 KB of live heap per generated row — which made the streaming export path scale linearly with row count
+/// rather than staying bounded (#82). Every scope is drawn exactly once, so the cache never served a hit and
+/// deriving on demand produces identical values.
+/// </remarks>
 public sealed class DeterministicRandomService(long seed) : IRandomService
 {
-    private readonly ConcurrentDictionary<string, Random> _scopedRandom = new(StringComparer.Ordinal);
-
     public int NextInt(string scope, int minInclusive, int maxExclusive)
         => ForScope(scope).Next(minInclusive, maxExclusive);
 
@@ -51,11 +60,8 @@ public sealed class DeterministicRandomService(long seed) : IRandomService
 
     private Random ForScope(string scope)
     {
-        return _scopedRandom.GetOrAdd(scope, static (key, baseSeed) =>
-        {
-            var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{baseSeed}:{key}"));
-            var scopedSeed = BitConverter.ToInt32(hash.AsSpan()[..4]);
-            return new Random(scopedSeed);
-        }, seed);
+        Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
+        SHA256.HashData(Encoding.UTF8.GetBytes($"{seed}:{scope}"), hash);
+        return new Random(BitConverter.ToInt32(hash[..4]));
     }
 }
