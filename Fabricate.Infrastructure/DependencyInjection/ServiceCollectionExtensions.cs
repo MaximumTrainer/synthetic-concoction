@@ -111,6 +111,9 @@ public static class ServiceCollectionExtensions
                     return await connections.ResolveAsync(session.WorkspaceId, session.ProjectId, ct).ConfigureAwait(false);
                 }));
             registry.Register(new GenerateDataTool(sp.GetRequiredService<ISyntheticDataOrchestrator>()));
+            // #87 — the agent states and revises its plan through a tool, so plans land in the invocation
+            // history and the audit log alongside the calls they govern.
+            registry.Register(new StatePlanTool());
             return registry;
         });
         services.AddScoped<IAgentChatService, AgentChatService>();

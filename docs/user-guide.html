@@ -422,6 +422,8 @@ tables:
   <tr><td><code>chat.tool_blocked</code></td><td>A tool call was refused because the tool is not in the workspace allowlist.</td></tr>
   <tr><td><code>chat.tool_requested</code></td><td>A tool call was parked for review (<code>ReviewRequired</code> sessions).</td></tr>
   <tr><td><code>chat.tool_approved</code></td><td>A parked call was approved; the run that follows is audited separately.</td></tr>
+  <tr><td><code>chat.plan_stated</code></td><td>The agent stated the steps it intends to take, before its first generating call.</td></tr>
+  <tr><td><code>chat.plan_revised</code></td><td>The agent revised a plan it had already stated.</td></tr>
 </table>
 <p>Two things are recorded deliberately narrowly:</p>
 <ul>
@@ -460,6 +462,18 @@ tables:
   <tr><td><code>Autonomous</code></td><td>Run without confirmation.</td></tr>
   <tr><td><code>ReviewRequired</code></td><td>Parked as <code>Pending</code>; an Editor or Admin approves each one. Use wherever <code>generate_data</code> has real side effects.</td></tr>
 </table>
+<h3 id="asking-rather-than-guessing">Asking rather than guessing</h3>
+<p>The agent is told, per mode, when to ask instead of assuming. A request like <em>"generate some test data"</em> against a ten-table schema leaves the tables, the row counts and the compliance profile unstated, and guessing is the wrong default for a tool that writes data.</p>
+<table>
+  <tr><th>Mode</th><th>Behaviour when something is unspecified</th></tr>
+  <tr><td><code>Guided</code></td><td>Asks one specific question covering everything it needs, and makes no generating call until answered. A request that is already specific proceeds without asking.</td></tr>
+  <tr><td><code>Autonomous</code></td><td>Chooses a sensible default and proceeds, <strong>stating every assumption</strong> in the reply so it can be corrected.</td></tr>
+  <tr><td><code>ReviewRequired</code></td><td>Asks rather than parking a call the reviewer cannot judge, since a reviewer sees the call and not the reasoning.</td></tr>
+</table>
+<p>The cases that trigger a question are: unspecified tables or row counts on a multi-table schema, an unspecified connection when the workspace has several, a compliance profile that would change what is produced, and anything that would overwrite existing data.</p>
+<h3 id="plans">Plans</h3>
+<p>For a request needing more than one tool call, the agent calls <code>state_plan</code> with the steps it intends to take before the first call that generates or changes data, and calls it again with revised steps if it changes course.</p>
+<p>A plan is a tool call rather than prose so it lands where every other call does: a tool invocation carrying the steps, a message in the conversation, and an audit event — <code>chat.plan_stated</code> or <code>chat.plan_revised</code>. A revision therefore sits next to the calls it governs, in order, instead of being buried in an assistant message. As with every tool, the steps stay on the invocation and out of the audit log.</p>
 <h3>Built-in Tools</h3>
 <table>
   <tr><th>Tool</th><th>Description</th></tr>

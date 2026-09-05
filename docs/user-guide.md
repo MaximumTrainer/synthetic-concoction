@@ -727,6 +727,8 @@ Open to any member of the account. Events come back newest first.
 | `chat.tool_blocked` | A tool call was refused because the tool is not in the workspace allowlist. |
 | `chat.tool_requested` | A tool call was parked for review (`ReviewRequired` sessions). |
 | `chat.tool_approved` | A parked call was approved; the run that follows is audited separately. |
+| `chat.plan_stated` | The agent stated the steps it intends to take, before its first generating call. |
+| `chat.plan_revised` | The agent revised a plan it had already stated. |
 
 Two things are recorded deliberately narrowly:
 
@@ -814,6 +816,32 @@ A provider refusal or failure is recorded as a `System` notice, never an error r
 | `Guided` | Run, and the model is instructed to explain before acting. |
 | `Autonomous` | Run without confirmation. |
 | `ReviewRequired` | Parked as `Pending`; an Editor or Admin approves each one via `POST …/tool-invocations/{id}/approve`. Use this wherever `generate_data` has real side effects. |
+
+#### Asking rather than guessing
+
+The agent is told, per mode, when to ask instead of assuming. A request like *"generate some test data"* against a
+ten-table schema leaves the tables, the row counts and the compliance profile unstated, and guessing is the wrong
+default for a tool that writes data.
+
+| Mode | Behaviour when something is unspecified |
+|---|---|
+| `Guided` | Asks one specific question covering everything it needs, and makes no generating call until answered. A request that is already specific proceeds without asking. |
+| `Autonomous` | Chooses a sensible default and proceeds, **stating every assumption** in the reply so it can be corrected. |
+| `ReviewRequired` | Asks rather than parking a call the reviewer cannot judge, since a reviewer sees the call and not the reasoning. |
+
+The cases that trigger a question are: unspecified tables or row counts on a multi-table schema, an unspecified
+connection when the workspace has several, a compliance profile that would change what is produced, and anything
+that would overwrite existing data.
+
+#### Plans
+
+For a request needing more than one tool call, the agent calls `state_plan` with the steps it intends to take
+before the first call that generates or changes data, and calls it again with revised steps if it changes course.
+
+A plan is a tool call rather than prose so it lands where every other call does: a tool invocation carrying the
+steps, a message in the conversation, and an audit event — `chat.plan_stated` or `chat.plan_revised`. A revision
+therefore sits next to the calls it governs, in order, instead of being buried in an assistant message. As with
+every tool, the steps stay on the invocation and out of the audit log.
 
 ### Built-in Tools
 
