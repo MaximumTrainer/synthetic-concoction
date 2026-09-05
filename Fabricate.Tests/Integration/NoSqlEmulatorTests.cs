@@ -304,6 +304,10 @@ public sealed class NoSqlEmulatorFixture : IAsyncLifetime
 
     private static string Summarise(string failure) => failure.Split('\n')[0].Trim();
 
+    /// <summary>A failure that is not "there is no Docker daemon" is a failure we are answerable for.</summary>
+    private static bool IsNotDockerItself(string? failure)
+        => failure is not null && !failure.Contains(nameof(DockerUnavailableException), StringComparison.Ordinal);
+
     public async Task InitializeAsync()
     {
         if (Environment.GetEnvironmentVariable("FABRICATE_SKIP_DOCKER_TESTS") == "1") return;
@@ -313,7 +317,16 @@ public sealed class NoSqlEmulatorFixture : IAsyncLifetime
 
         if (Environment.GetEnvironmentVariable("FABRICATE_COSMOS_EMULATOR") == "1") await StartCosmosAsync();
 
-        DockerAvailable = DynamoConnectionString is not null || FirestoreProjectId is not null;
+        // Derived from the failures, not from the successes. The first version asked "did any of my containers
+        // start?", which is false in exactly two situations — no Docker, and every emulator broken — so the guard
+        // switched itself off in the one case it existed to catch, and did precisely that in CI (#91).
+        // Testcontainers raises DockerUnavailableException only for the first, so anything else means Docker was
+        // there and the fault is ours.
+        DockerAvailable =
+            DynamoConnectionString is not null
+            || FirestoreProjectId is not null
+            || IsNotDockerItself(DynamoFailure)
+            || IsNotDockerItself(FirestoreFailure);
     }
 
     public async Task DisposeAsync()
