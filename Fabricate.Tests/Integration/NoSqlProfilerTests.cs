@@ -86,6 +86,48 @@ public sealed class NoSqlProfilerTests : IAsyncLifetime
         return await new MongoDbDataProfiler().ProfileAsync(collections, _connectionString);
     }
 
+    /// <summary>
+    /// Every test here self-skips when the container did not start, so without this a bad image tag would show up
+    /// as a green run covering nothing (#90, #91).
+    /// </summary>
+    [Fact]
+    public void TheContainerStartedWhenDockerIsAvailable()
+    {
+        if (Environment.GetEnvironmentVariable("FABRICATE_SKIP_DOCKER_TESTS") == "1") return;
+        if (_container is null) return; // No Docker at all.
+
+        _connectionString.Should().NotBeNull("the MongoDB container started, so it must be reachable");
+    }
+
+    /// <summary>
+    /// Discovery against a real server, which #53's own integration test never did: it was gated behind a
+    /// connection string nobody set, and iterated a list that was always empty even when it ran (#91).
+    /// </summary>
+    [Fact]
+    public async Task TheDiscovererReportsTheCollectionItsFieldsAndItsDefaultIndex()
+    {
+        if (_connectionString is null) return;
+
+        var collections = await new MongoDbSchemaDiscoverer().DiscoverCollectionsAsync(_connectionString, "clinic");
+
+        var patients = collections.Should().ContainSingle(c => c.CollectionName == "patients").Subject;
+        patients.DatabaseName.Should().Be("clinic");
+        patients.QualifiedName.Should().Be("clinic.patients");
+        patients.Fields.Select(f => f.Name).Should().Contain(["email", "age", "active", "note"]);
+        patients.Indexes.Should().Contain(i => i.Name == "_id_", "MongoDB creates the _id_ index for every collection");
+
+        foreach (var field in patients.Fields) AssertValidFieldDescriptor(field);
+    }
+
+    /// <summary>A descriptor with a blank name or an out-of-range type is a discovery bug, not a data shape.</summary>
+    internal static void AssertValidFieldDescriptor(FieldDescriptor field)
+    {
+        field.Name.Should().NotBeNullOrEmpty();
+        field.FieldType.Should().BeDefined();
+
+        foreach (var nested in field.NestedFields ?? []) AssertValidFieldDescriptor(nested);
+    }
+
     [Fact]
     public async Task TheProfileReportsAggregatesForEveryField()
     {

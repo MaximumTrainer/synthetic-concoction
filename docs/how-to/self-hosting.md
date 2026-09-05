@@ -103,6 +103,22 @@ Project-bound credential → workspace default for the provider → the workspac
 platform credential (only where `FABRICATE_LLM_PLATFORM_FALLBACK` allows) → none, in which case the chat returns a
 clear notice and the direct `/tool` commands still work.
 
+### Whether the agent asks before it acts
+
+In `Guided` mode the agent is instructed to ask rather than guess when a request leaves the row counts, the target
+database or the compliance profile open, or when it would overwrite existing data. Whether a given model actually
+does that is the model's judgement, not something the code can enforce, so it is measured rather than asserted:
+`AgentClarificationLiveEvalTests` runs seven fixtures through a real model and reports how many behaved as
+expected. The `integration-tests` workflow runs it weekly and on dispatch; see
+[CI secrets for integration tests](ci-integration-secrets.md).
+
+| Model | Fixtures as expected | Last verified |
+| --- | --- | --- |
+| `claude-opus-5` | *not yet run* — needs `FABRICATE_LIVE_LLM_API_KEY` | — |
+
+The eval fails below 6/7. One fixture going the other way is a model exercising judgement; two is the guidance no
+longer landing. **Until a row above carries a rate, treat "the agent asks clarifying questions" as designed for
+and unverified** — the prompt contract and the harness are covered offline, the behaviour is not.
 
 ### Artifact storage
 

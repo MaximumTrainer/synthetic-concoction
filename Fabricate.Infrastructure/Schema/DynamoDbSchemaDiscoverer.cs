@@ -1,4 +1,3 @@
-using Amazon;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.Model;
 using Fabricate.Application.Abstractions;
@@ -81,38 +80,7 @@ public sealed class DynamoDbSchemaDiscoverer : INoSqlSchemaDiscoverer
     }
 
     private static AmazonDynamoDBClient CreateClient(string connectionString)
-    {
-        string? region = null;
-        string? serviceUrl = null;
-
-        if (!string.IsNullOrWhiteSpace(connectionString))
-        {
-            foreach (var part in connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var kv = part.Split('=', 2);
-                if (kv.Length == 2)
-                {
-                    switch (kv[0].Trim().ToLowerInvariant())
-                    {
-                        case "region": region = kv[1].Trim(); break;
-                        case "serviceurl": serviceUrl = kv[1].Trim(); break;
-                    }
-                }
-            }
-        }
-
-        region ??= Environment.GetEnvironmentVariable("AWS_DEFAULT_REGION") ?? "us-east-1";
-
-        var config = new AmazonDynamoDBConfig
-        {
-            RegionEndpoint = RegionEndpoint.GetBySystemName(region)
-        };
-
-        if (!string.IsNullOrEmpty(serviceUrl))
-            config.ServiceURL = serviceUrl;
-
-        return new AmazonDynamoDBClient(config);
-    }
+        => DynamoDbConnectionString.CreateClient(connectionString);
 
     private static async Task<List<string>> ListAllTablesAsync(
         AmazonDynamoDBClient client,

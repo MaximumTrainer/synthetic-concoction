@@ -27,19 +27,9 @@ public sealed class FirestoreSchemaDiscoverer : INoSqlSchemaDiscoverer
         string databaseName,
         CancellationToken cancellationToken = default)
     {
-        string projectId = !string.IsNullOrWhiteSpace(connectionString)
-            ? connectionString.Trim()
-            : Environment.GetEnvironmentVariable("GOOGLE_CLOUD_PROJECT")
-              ?? throw new InvalidOperationException(
-                  "GCP project ID must be provided as connectionString or GOOGLE_CLOUD_PROJECT environment variable must be set.");
+        string projectId = FirestoreConnection.ResolveProjectId(connectionString);
 
-        var builder = new FirestoreDbBuilder
-        {
-            ProjectId = projectId,
-            DatabaseId = string.IsNullOrWhiteSpace(databaseName) ? "(default)" : databaseName
-        };
-
-        FirestoreDb db = await builder.BuildAsync(cancellationToken);
+        FirestoreDb db = await FirestoreConnection.CreateAsync(projectId, databaseName, cancellationToken);
 
         var results = new List<CollectionMetadata>();
         await foreach (CollectionReference collRef in db.ListRootCollectionsAsync().WithCancellation(cancellationToken))

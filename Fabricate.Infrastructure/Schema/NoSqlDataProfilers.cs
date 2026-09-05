@@ -33,7 +33,7 @@ public sealed class CosmosDbDataProfiler : INoSqlDataProfiler
                     "Cosmos DB connection string must be provided or COSMOSDB_CONNECTION_STRING must be set.");
         }
 
-        using var client = new CosmosClient(connectionString);
+        using var client = CosmosConnectionString.CreateClient(connectionString);
         var profiles = new List<CollectionProfile>();
 
         foreach (var metadata in collections)
@@ -100,10 +100,10 @@ public sealed class DynamoDbDataProfiler : INoSqlDataProfiler
     {
         ArgumentNullException.ThrowIfNull(collections);
 
-        // Ambient credentials by default, as the discoverer does — an IAM role rather than a stored key.
-        using var client = string.IsNullOrWhiteSpace(connectionString)
-            ? new AmazonDynamoDBClient()
-            : new AmazonDynamoDBClient(new AmazonDynamoDBConfig { ServiceURL = connectionString });
+        // The same connection-string format the discoverer accepts — "region=...;serviceUrl=..." — because the
+        // CLI hands the identical --connection to both, and an adapter pair that disagreed about what the string
+        // means would work for one command and fail for the other.
+        using var client = DynamoDbConnectionString.CreateClient(connectionString);
 
         var profiles = new List<CollectionProfile>();
 
@@ -197,13 +197,8 @@ public sealed class FirestoreDataProfiler : INoSqlDataProfiler
     {
         ArgumentNullException.ThrowIfNull(collections);
 
-        var projectId = string.IsNullOrWhiteSpace(connectionString)
-            ? Environment.GetEnvironmentVariable("GOOGLE_CLOUD_PROJECT")
-                ?? throw new InvalidOperationException(
-                    "Firestore project id must be provided or GOOGLE_CLOUD_PROJECT must be set.")
-            : connectionString;
-
-        var database = await FirestoreDb.CreateAsync(projectId).ConfigureAwait(false);
+        var database = await FirestoreConnection
+            .CreateAsync(connectionString, cancellationToken: cancellationToken).ConfigureAwait(false);
         var profiles = new List<CollectionProfile>();
 
         foreach (var metadata in collections)

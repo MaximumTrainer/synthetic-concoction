@@ -30,7 +30,7 @@ public sealed class CosmosDbSchemaDiscoverer : INoSqlSchemaDiscoverer
                 ?? throw new InvalidOperationException(
                     "CosmosDB connection string must be provided or COSMOSDB_CONNECTION_STRING environment variable must be set.");
 
-        using var client = new CosmosClient(connectionString, new CosmosClientOptions { ApplicationName = "Fabricate" });
+        using var client = CosmosConnectionString.CreateClient(connectionString);
 
         var database = client.GetDatabase(databaseName);
         var results = new List<CollectionMetadata>();

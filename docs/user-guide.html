@@ -526,6 +526,18 @@ GET /accounts/{accountId}/llm-usage?groupBy=credential</code></pre>
 <pre><code class="language-bash">fabricate discover --provider mongodb --connection &quot;mongodb://host:27017&quot; --database clinic
 fabricate discover-profile --provider mongodb --connection &quot;mongodb://host:27017&quot; --database clinic</code></pre>
 <p><code>discover</code> prints collection metadata — fields with inferred types, partition key, indexes. <code>discover-profile</code> prints a <code>NoSqlProfileSnapshot</code>: document count per collection, and per field its inferred type, non-null and null counts, a distinct-value estimate, and a minimum and maximum.</p>
+<h3 id="connection-strings">Connection strings</h3>
+<p>Both commands take the same <code>--connection</code> for a given provider, and each provider's adapters read it the same way:</p>
+<table>
+<thead><tr><th>Provider</th><th><code>--connection</code></th><th><code>--database</code></th></tr></thead>
+<tbody>
+<tr><td><code>mongodb</code></td><td>A MongoDB connection string</td><td>Database name</td></tr>
+<tr><td><code>cosmosdb</code></td><td><code>AccountEndpoint=…;AccountKey=…</code></td><td>Database name</td></tr>
+<tr><td><code>dynamodb</code></td><td><code>region=us-east-1</code>, optionally <code>;serviceUrl=http://localhost:8000</code></td><td>A table-name prefix, or empty for all</td></tr>
+<tr><td><code>firestore</code></td><td>The GCP project id</td><td>Named database, or empty for <code>(default)</code></td></tr>
+</tbody>
+</table>
+<p>Credentials are ambient wherever the provider offers it — an IAM role for DynamoDB, Application Default Credentials for Firestore — so no key need be stored. Two extra Cosmos keys exist for constrained networks and for the emulator: <code>ConnectionMode=Gateway</code> talks HTTPS to one endpoint instead of opening a range of TCP ports, and <code>DisableServerCertificateValidation=True</code> is accepted <strong>only</strong> for a loopback endpoint, so it cannot weaken a connection to a real account. DynamoDB Local and the Firestore emulator (<code>FIRESTORE_EMULATOR_HOST</code>) both work against the same adapters, unchanged.</p>
 <h3 id="what-the-metadata-model-does-not-have">What the metadata model does not have</h3>
 <p><strong>No foreign-key graph.</strong> Document stores do not declare relationships, so nothing can be inferred that the database itself does not know. The relational generator's referential integrity — parent rows before children, foreign keys pointing at real rows — has no equivalent here, and collection metadata carries no <code>ForeignKeySchema</code>. Relationships between collections are a matter of application convention, and Fabricate does not guess at them.</p>
 <ul>

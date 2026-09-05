@@ -92,6 +92,15 @@ FABRICATE_AUDIT_SWEEP_MINUTES=360    # sweep every six hours (the default)</code
 <p>Bedrock model ids take the <code>anthropic.</code> prefix (e.g. <code>anthropic.claude-opus-5</code>); Vertex uses the bare id.</p>
 <h3 id="which-credential-a-chat-turn-uses">Which credential a chat turn uses</h3>
 <p>Project-bound credential → workspace default for the provider → the workspace's single active credential → the platform credential (only where <code>FABRICATE_LLM_PLATFORM_FALLBACK</code> allows) → none, in which case the chat returns a clear notice and the direct <code>/tool</code> commands still work.</p>
+<h3 id="whether-the-agent-asks-before-it-acts">Whether the agent asks before it acts</h3>
+<p>In <code>Guided</code> mode the agent is instructed to ask rather than guess when a request leaves the row counts, the target database or the compliance profile open, or when it would overwrite existing data. Whether a given model actually does that is the model's judgement, not something the code can enforce, so it is measured rather than asserted: <code>AgentClarificationLiveEvalTests</code> runs seven fixtures through a real model and reports how many behaved as expected. The <code>integration-tests</code> workflow runs it weekly and on dispatch; see <a href="ci-integration-secrets.html">CI secrets for integration tests</a>.</p>
+<table>
+<thead><tr><th>Model</th><th>Fixtures as expected</th><th>Last verified</th></tr></thead>
+<tbody>
+<tr><td><code>claude-opus-5</code></td><td><em>not yet run</em> — needs <code>FABRICATE_LIVE_LLM_API_KEY</code></td><td>—</td></tr>
+</tbody>
+</table>
+<p>The eval fails below 6/7. One fixture going the other way is a model exercising judgement; two is the guidance no longer landing. <strong>Until a row above carries a rate, treat "the agent asks clarifying questions" as designed for and unverified</strong> — the prompt contract and the harness are covered offline, the behaviour is not.</p>
 <h3 id="artifact-storage">Artifact storage</h3>
 <p>Generated artifacts default to the local file system (<code>FABRICATE_ARTIFACTS_PATH</code>, else the OS temp directory). That is right for local use and <strong>wrong on every hosted target</strong>: Fly machines are replaced, Cloud Run and Container Apps revisions are immutable, ECS tasks restart. The files disappear and a completed run is left pointing at artifacts that no longer exist.</p>
 <p>Set <code>FABRICATE_ARTIFACT_STORE</code> to use object storage instead. Three adapters cover the field: <code>s3</code> for <strong>AWS S3, MinIO, Cloudflare R2 and Backblaze B2</strong> (one API between them), <code>azure-blob</code> for <strong>Azure Blob Storage</strong>, and <code>gcs</code> for <strong>Google Cloud Storage</strong>.</p>

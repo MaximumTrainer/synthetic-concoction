@@ -11,6 +11,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- The emulator suite (#91) seeds DynamoDB and Cosmos through the same connection-string parsers the adapters
+       use, so the format is exercised on the way in as well as on the way out. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Fabricate.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="AWSSDK.DynamoDBv2" Version="4.0.103.5" />
     <!-- S3-compatible artifact storage (#84): AWS S3, MinIO, Cloudflare R2 and Backblaze B2 all speak this API. -->

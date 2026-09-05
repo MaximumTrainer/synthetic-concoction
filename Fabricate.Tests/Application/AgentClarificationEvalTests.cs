@@ -20,7 +20,8 @@ namespace Fabricate.Tests.Application;
 /// testable, and what these do, is the two halves either side of that judgement: that the <em>prompt</em> the
 /// provider receives carries the guidance for the session's mode, and that the <em>harness</em> handles each
 /// shape of reply correctly — a question runs no tool, a plan is recorded and audited, a revision is recorded as
-/// a revision. Live behavioural verification against a real provider belongs to #86.
+/// a revision. Live behavioural verification against a real provider is <c>AgentClarificationLiveEvalTests</c>,
+/// which drives the same fixtures through a real model (#91).
 /// </para>
 ///
 /// <para>
@@ -34,24 +35,33 @@ public sealed class AgentClarificationEvalTests
     /// One case: a prompt, the mode it is asked in, and what the guidance must cover for it. The prompts are
     /// documentation — they say what kind of request the clause exists for.
     /// </summary>
-    public sealed record Fixture(string Name, string Prompt, ChatMode Mode, bool ExpectAskGuidance, string MustMention);
+    /// <param name="ExpectAskGuidance">Whether the prompt for this mode must tell the model to ask.</param>
+    /// <param name="MustMention">The clause the prompt must carry, which is what this suite can check offline.</param>
+    /// <param name="ExpectsQuestion">
+    /// What a model should actually <em>do</em> with this prompt: ask before acting, or proceed. Nothing offline
+    /// can check that — it is the model's judgement — so it is checked by the live eval in
+    /// <c>AgentClarificationLiveEvalTests</c>, which reads it from here so the fixture stays the one place a case
+    /// is described (#91).
+    /// </param>
+    public sealed record Fixture(
+        string Name, string Prompt, ChatMode Mode, bool ExpectAskGuidance, string MustMention, bool ExpectsQuestion);
 
     public static TheoryData<Fixture> Fixtures =>
     [
         new("ambiguous-row-counts", "generate some test data", ChatMode.Guided, true,
-            "how many rows"),
+            "how many rows", ExpectsQuestion: true),
         new("ambiguous-connection", "discover the schema and generate data", ChatMode.Guided, true,
-            "which connection or project database"),
+            "which connection or project database", ExpectsQuestion: true),
         new("ambiguous-compliance", "generate patient records for testing", ChatMode.Guided, true,
-            "compliance profile"),
+            "compliance profile", ExpectsQuestion: true),
         new("destructive", "regenerate everything in the orders database", ChatMode.Guided, true,
-            "overwrite or replace existing data"),
+            "overwrite or replace existing data", ExpectsQuestion: true),
         new("specific", "generate 500 rows in main.users using seed 4242", ChatMode.Guided, true,
-            "proceed without asking"),
+            "proceed without asking", ExpectsQuestion: false),
         new("autonomous-assumes", "generate some test data", ChatMode.Autonomous, false,
-            "state every assumption"),
+            "state every assumption", ExpectsQuestion: false),
         new("review-required-asks", "generate some test data", ChatMode.ReviewRequired, true,
-            "ask rather than park a call"),
+            "ask rather than park a call", ExpectsQuestion: true),
     ];
 
     private readonly InMemorySessionRepository _sessions = new();

@@ -978,6 +978,25 @@ fabricate discover-profile --provider mongodb --connection "mongodb://host:27017
 prints a `NoSqlProfileSnapshot`: document count per collection, and per field its inferred type, non-null and null
 counts, a distinct-value estimate, and a minimum and maximum.
 
+### Connection strings
+
+Both commands take the same `--connection` for a given provider, and each provider's adapters read it the same
+way:
+
+| Provider | `--connection` | `--database` |
+| --- | --- | --- |
+| `mongodb` | A MongoDB connection string | Database name |
+| `cosmosdb` | `AccountEndpoint=…;AccountKey=…` | Database name |
+| `dynamodb` | `region=us-east-1`, optionally `;serviceUrl=http://localhost:8000` | A table-name prefix, or empty for all |
+| `firestore` | The GCP project id | Named database, or empty for `(default)` |
+
+Credentials are ambient wherever the provider offers it — an IAM role for DynamoDB, Application Default
+Credentials for Firestore — so no key need be stored. Two extra Cosmos keys exist for constrained networks and for
+the emulator: `ConnectionMode=Gateway` talks HTTPS to one endpoint instead of opening a range of TCP ports, and
+`DisableServerCertificateValidation=True` is accepted **only** for a loopback endpoint, so it cannot weaken a
+connection to a real account. DynamoDB Local and the Firestore emulator (`FIRESTORE_EMULATOR_HOST`) both work
+against the same adapters, unchanged.
+
 ### What the metadata model does not have
 
 **No foreign-key graph.** Document stores do not declare relationships, so nothing can be inferred that the

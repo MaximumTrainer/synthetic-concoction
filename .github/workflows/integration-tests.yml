@@ -1,8 +1,11 @@
 name: Integration Tests
 
-# Opt-in integration tests against real databases and cloud services (#57).
-# Each test self-gates on its environment variable, so a missing secret skips the test rather than failing it;
-# the "gates" step prints which suites are enabled so a silent skip is visible in the log.
+# Integration tests that need something the main CI job does not provide (#57, #91).
+#
+# The NoSQL adapters no longer live here: DynamoDB, Firestore and MongoDB run against emulators in the main CI
+# job, with no credentials at all. What is left is the work that genuinely cannot run there — the Cosmos DB
+# emulator, which is too heavy for every push, and the behavioural eval against a real model, which costs money.
+# Each self-gates and prints whether it was exercised, so a missing secret is visible rather than silent.
 
 on:
   workflow_dispatch:
@@ -11,7 +14,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write # for AWS / GCP OIDC
 
 env:
   DOTNET_VERSION: "10.0.x"
@@ -49,68 +51,51 @@ jobs:
           --filter "FullyQualifiedName~PostgreSql|FullyQualifiedName~PostgresPersistence"
           --logger "console;verbosity=normal"
 
-  nosql:
-    name: NoSQL adapters (Cosmos DB, MongoDB, DynamoDB, Firestore)
+  cosmos:
+    name: Cosmos DB (emulator)
+    runs-on: ubuntu-latest
+    # The Cosmos emulator is a multi-gigabyte image that takes minutes to become healthy, which is why it is here
+    # on a weekly schedule rather than in the main CI job alongside DynamoDB and Firestore.
+    env:
+      FABRICATE_COSMOS_EMULATOR: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - run: dotnet restore Fabricate.slnx
+      - run: dotnet build Fabricate.slnx --no-restore --configuration Release
+      - name: Run NoSQL emulator tests with Cosmos enabled
+        run: >
+          dotnet test Fabricate.Tests/Fabricate.Tests.csproj --no-build --configuration Release
+          --filter "FullyQualifiedName~NoSqlEmulatorTests"
+          --logger "console;verbosity=detailed"
+
+  agent-eval:
+    name: Clarifying-question eval (live model)
     runs-on: ubuntu-latest
     environment: integration
     env:
-      COSMOSDB_CONNECTION_STRING: ${{ secrets.COSMOSDB_CONNECTION_STRING }}
-      COSMOSDB_TEST_DATABASE: ${{ secrets.COSMOSDB_TEST_DATABASE }}
-      MONGODB_CONNECTION_STRING: ${{ secrets.MONGODB_CONNECTION_STRING }}
-      MONGODB_TEST_DATABASE: ${{ secrets.MONGODB_TEST_DATABASE }}
-      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-      DYNAMODB_TABLE_PREFIX: ${{ secrets.DYNAMODB_TABLE_PREFIX }}
-      DYNAMODB_LOCAL_URL: ${{ secrets.DYNAMODB_LOCAL_URL }}
-      GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+      FABRICATE_LIVE_LLM_API_KEY: ${{ secrets.FABRICATE_LIVE_LLM_API_KEY }}
+      FABRICATE_LIVE_LLM_MODEL: ${{ vars.FABRICATE_LIVE_LLM_MODEL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Report which gates are enabled (values are never printed)
+      - name: Report whether the eval is enabled (the key is never printed)
         run: |
-          for v in COSMOSDB_CONNECTION_STRING MONGODB_CONNECTION_STRING AWS_DEFAULT_REGION GOOGLE_CLOUD_PROJECT; do
-            if [ -n "${!v}" ]; then echo "enabled: $v"; else echo "skipped: $v not set"; fi
-          done
-
-      # AWS: prefer OIDC role assumption (repository variable AWS_ROLE_TO_ASSUME); fall back to static keys.
-      - name: Configure AWS credentials (OIDC)
-        if: vars.AWS_ROLE_TO_ASSUME != '' && env.AWS_DEFAULT_REGION != ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-      - name: Configure AWS credentials (static keys)
-        if: vars.AWS_ROLE_TO_ASSUME == '' && env.AWS_DEFAULT_REGION != ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-
-      # GCP: the client libraries read a file path, so materialise the JSON secret into the runner temp dir.
-      - name: Configure GCP credentials
-        if: env.GOOGLE_CLOUD_PROJECT != ''
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
-        run: |
-          if [ -z "$GOOGLE_APPLICATION_CREDENTIALS_JSON" ]; then
-            echo "GOOGLE_CLOUD_PROJECT is set but GOOGLE_APPLICATION_CREDENTIALS_JSON is not; Firestore tests will fail on auth." >&2
-            exit 0
+          if [ -n "$FABRICATE_LIVE_LLM_API_KEY" ]; then
+            echo "enabled: FABRICATE_LIVE_LLM_API_KEY is set; the eval will call a real model."
+          else
+            echo "skipped: FABRICATE_LIVE_LLM_API_KEY is not set; clarifying-question behaviour will NOT be verified."
           fi
-          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > "$RUNNER_TEMP/gcp-credentials.json"
-          chmod 600 "$RUNNER_TEMP/gcp-credentials.json"
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp-credentials.json" >> "$GITHUB_ENV"
 
       - run: dotnet restore Fabricate.slnx
       - run: dotnet build Fabricate.slnx --no-restore --configuration Release
-      - name: Run NoSQL adapter tests
+      - name: Run the clarifying-question eval
         run: >
           dotnet test Fabricate.Tests/Fabricate.Tests.csproj --no-build --configuration Release
-          --filter "FullyQualifiedName~NoSqlAdapterIntegrationTests"
-          --logger "console;verbosity=normal"
-
-      - name: Remove materialised credentials
-        if: always()
-        run: rm -f "$RUNNER_TEMP/gcp-credentials.json"
+          --filter "FullyQualifiedName~AgentClarificationLiveEvalTests"
+          --logger "console;verbosity=detailed"
