@@ -22,9 +22,9 @@ public sealed class LlmCredentialServiceTests
 
     public LlmCredentialServiceTests()
     {
-        var audit = new AuditLogService(_auditRepo);
-        _workspaceService = new WorkspaceService(audit);
-        _service = new LlmCredentialService(_store, _cipher, _workspaceService, audit, _probe, _options);
+        var audit = new AuditLogService(_auditRepo, new InMemoryAccountRepository());
+        _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), audit);
+        _service = new LlmCredentialService(_store, _cipher, _workspaceService, audit, _probe, new PromptDataBoundary(), _options);
     }
 
     private async Task<(Guid wsId, Guid adminId, Guid editorId, Guid viewerId)> CreateWorkspaceAsync()

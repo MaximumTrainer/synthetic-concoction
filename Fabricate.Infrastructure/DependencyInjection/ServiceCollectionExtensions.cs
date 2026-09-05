@@ -24,6 +24,7 @@ using Fabricate.Infrastructure.Schema;
 using Fabricate.Infrastructure.Webhooks;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Fabricate.Infrastructure.DependencyInjection;
 
@@ -57,53 +58,86 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISyntheticDataOrchestrator, SyntheticDataOrchestrator>();
         services.AddSingleton<ISchemaReviewService, SchemaReviewService>();
         services.AddSingleton<IGenerationPlanService, GenerationPlanService>();
-        services.AddSingleton<RunLifecycleService>();
+        services.AddScoped<RunLifecycleService>();
+        // #66 — starting and reading runs through the API, scoped to a workspace the caller belongs to.
+        services.AddScoped<IRunExecutionService, RunExecutionService>();
 
         // #26 — accounts
-        services.AddSingleton<IAccountService, AccountService>();
-        services.AddSingleton<IInvitationService, InvitationService>();
-        services.AddSingleton<IUserProfileService, UserProfileService>();
+        services.AddScoped<IAccountService, AccountService>();
+        services.AddScoped<IInvitationService, InvitationService>();
+        services.AddScoped<IUserProfileService, UserProfileService>();
 
         // #27 — governance
-        services.AddSingleton<IAccountGroupService, AccountGroupService>();
-        services.AddSingleton<IAllowedDomainService, AllowedDomainService>();
-        services.AddSingleton<IAuditLogService, AuditLogService>();
+        services.AddScoped<IAccountGroupService, AccountGroupService>();
+        services.AddScoped<IAllowedDomainService, AllowedDomainService>();
+        services.AddScoped<IAuditLogService, AuditLogService>();
+        // #83 — the prompt data boundary is stateless policy, so a singleton.
+        services.TryAddSingleton<IPromptDataBoundary, PromptDataBoundary>();
+        // Retention defaults to "keep everything" (#74); the host overrides this from the environment.
+        services.TryAddSingleton(new AuditRetentionOptions());
+        services.TryAddSingleton(TimeProvider.System);
 
         // #28 — workspaces
-        services.AddSingleton<IWorkspaceService, WorkspaceService>();
-        services.AddSingleton<IConnectionCatalogService, ConnectionCatalogService>();
-        services.AddSingleton<IInstructionVersionService, InstructionVersionService>();
+        services.AddScoped<IWorkspaceService, WorkspaceService>();
+        services.AddScoped<IConnectionCatalogService, ConnectionCatalogService>();
+        // #70 — serving endpoints derived from ingested OpenAPI contracts.
+        services.AddScoped<IGeneratedApiService, GeneratedApiService>();
+        // #69 — a schema provider per workspace connection, instead of the one instance-level provider.
+        services.TryAddSingleton<ISchemaProviderFactory, SchemaProviderFactory>();
+        services.AddScoped<IConnectionResolver, ConnectionResolver>();
+        services.AddScoped<IInstructionVersionService, InstructionVersionService>();
 
         // #29 — projects
         services.AddSingleton<IProjectRepository, InMemoryProjectRepository>();
-        services.AddSingleton<IProjectService, ProjectService>();
-        services.AddSingleton<IProjectDatabaseCatalog, ProjectDatabaseCatalog>();
+        services.AddScoped<IProjectService, ProjectService>();
+        services.AddScoped<IProjectDatabaseCatalog, ProjectDatabaseCatalog>();
 
         // #30 — chat
         services.AddSingleton<IToolRegistry>(sp =>
         {
             var registry = new ToolRegistry();
             // Built-in tools registered at composition time
-            registry.Register(new DiscoverSchemaTool(sp.GetRequiredService<ISchemaDiscoveryService>()));
+            // The resolver opens a scope per call: this registry is a singleton, and the connection repository
+            // and cipher are scoped once a database provider is configured (#69).
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+            registry.Register(new DiscoverSchemaTool(
+                sp.GetRequiredService<ISchemaDiscoveryService>(),
+                async (sessionId, ct) =>
+                {
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var sessions = scope.ServiceProvider.GetRequiredService<ISessionRepository>();
+                    var session = await sessions.GetByIdAsync(sessionId, ct).ConfigureAwait(false);
+                    if (session is null) return null;
+
+                    var connections = scope.ServiceProvider.GetRequiredService<IConnectionResolver>();
+                    return await connections.ResolveAsync(session.WorkspaceId, session.ProjectId, ct).ConfigureAwait(false);
+                }));
             registry.Register(new GenerateDataTool(sp.GetRequiredService<ISyntheticDataOrchestrator>()));
+            // #87 — the agent states and revises its plan through a tool, so plans land in the invocation
+            // history and the audit log alongside the calls they govern.
+            registry.Register(new StatePlanTool());
             return registry;
         });
-        services.AddSingleton<IAgentChatService, AgentChatService>();
+        services.AddScoped<IAgentChatService, AgentChatService>();
 
         // #31 — API keys
-        services.AddSingleton<IApiKeyService, ApiKeyService>();
+        services.AddScoped<IApiKeyService, ApiKeyService>();
 
         // #24 — workflows
-        services.AddSingleton<IWorkflowService, WorkflowService>();
-        services.AddSingleton<ISkillRegistry, SkillRegistryService>();
+        services.AddScoped<IWorkflowService, WorkflowService>();
+        services.AddScoped<ISkillRegistry, SkillRegistryService>();
         services.AddSingleton<IApiContractIngestionService, OpenApiContractIngestionService>();
 
         // #13 — schema/profile snapshots
-        services.AddSingleton<ISchemaSnapshotService, SchemaSnapshotService>();
-        services.AddSingleton<IProfileSnapshotService, ProfileSnapshotService>();
+        // Snapshot services still hold their own in-memory state (no repository yet — see #75), so they stay singleton:
+        // scoping them would discard snapshots between requests. They consume nothing scoped, so no captive dependency.
+        // Scoped, not singleton: these now read through repositories, which AddFabricatePersistence makes scoped.
+        // A singleton here would capture one DbContext for the process (#78).
+        services.AddScoped<ISchemaSnapshotService, SchemaSnapshotService>();
+        services.AddScoped<IProfileSnapshotService, ProfileSnapshotService>();
 
         // #43 — webhooks
-        services.AddSingleton<IWebhookService, WebhookService>();
+        services.AddScoped<IWebhookService, WebhookService>();
 
         return services;
     }
@@ -128,16 +162,46 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IExporter, SqlExporter>();
         services.AddSingleton<IExporter, ParquetExporter>();
 
-        // Generated artifacts go to FABRICATE_ARTIFACTS_PATH when set, else the OS temp directory. On hosted platforms
-        // the container filesystem is ephemeral either way; point this at a mounted volume if artifacts must outlive
-        // a restart (object storage is tracked as a follow-up on #61).
-        services.AddSingleton<IArtifactStore>(_ =>
+        // Where generated artifacts live (#84). The filesystem remains the default because it needs no
+        // configuration; it is only wrong on a hosted target, where the container filesystem does not survive a
+        // restart and a completed run ends up pointing at files that no longer exist.
+        services.TryAddSingleton(ArtifactStoreOptions.FromEnvironment(Environment.GetEnvironmentVariable));
+
+        services.AddSingleton<IArtifactStore>(sp =>
         {
-            var configured = Environment.GetEnvironmentVariable("FABRICATE_ARTIFACTS_PATH");
-            var baseDir = string.IsNullOrWhiteSpace(configured)
-                ? Path.Combine(Path.GetTempPath(), "fabricate-artifacts")
-                : configured;
-            return new FileSystemArtifactStore(baseDir);
+            var options = sp.GetRequiredService<ArtifactStoreOptions>();
+
+            var errors = options.Validate();
+            if (errors.Count > 0)
+            {
+                // Refused at startup rather than on the first run: a misconfigured store that only fails once
+                // someone generates data wastes the run and is discovered at the worst moment.
+                throw new InvalidOperationException(
+                    "Artifact storage configuration is invalid:\n - " + string.Join("\n - ", errors));
+            }
+
+            if (!options.IsObjectStorage)
+            {
+                var configured = Environment.GetEnvironmentVariable("FABRICATE_ARTIFACTS_PATH");
+                var baseDir = string.IsNullOrWhiteSpace(configured)
+                    ? Path.Combine(Path.GetTempPath(), "fabricate-artifacts")
+                    : configured;
+                return new FileSystemArtifactStore(baseDir);
+            }
+
+            var secrets = sp.GetRequiredService<ISecretProvider>();
+
+            if (options.IsAzureBlob)
+            {
+                return new AzureBlobArtifactStore(CloudStorageClientFactory.CreateAzureBlob(options, secrets));
+            }
+
+            if (options.IsGcs)
+            {
+                return new GcsArtifactStore(CloudStorageClientFactory.CreateGcs(options, secrets), options.BucketName!);
+            }
+
+            return new S3ArtifactStore(S3ClientFactory.Create(options, secrets), options.BucketName!);
         });
 
         services.AddSingleton<IDataProfiler>(sp =>
@@ -162,10 +226,25 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IApiKeyStore, InMemoryApiKeyStore>();
         services.AddSingleton<ISecretProvider, EnvSecretProvider>();
         services.AddSingleton<IWebhookRepository, InMemoryWebhookRepository>();
+        services.AddSingleton<ISchemaSnapshotRepository, InMemorySchemaSnapshotRepository>();
+        services.AddSingleton<IProfileSnapshotRepository, InMemoryProfileSnapshotRepository>();
+        services.AddSingleton<IApiContractRepository, InMemoryApiContractRepository>();
+
+        // #65 — the remaining platform aggregates. Singletons here because the in-memory adapters *are* the store;
+        // AddFabricatePersistence replaces every one with a scoped EF adapter.
+        services.AddSingleton<IWorkspaceRepository, InMemoryWorkspaceRepository>();
+        services.AddSingleton<IConnectionRepository, InMemoryConnectionRepository>();
+        services.AddSingleton<IInstructionVersionRepository, InMemoryInstructionVersionRepository>();
+        services.AddSingleton<IProjectDatabaseRepository, InMemoryProjectDatabaseRepository>();
+        services.AddSingleton<IWorkflowRepository, InMemoryWorkflowRepository>();
+        services.AddSingleton<ISkillRepository, InMemorySkillRepository>();
+        services.AddSingleton<IAccountGroupRepository, InMemoryAccountGroupRepository>();
+        services.AddSingleton<IAllowedDomainRepository, InMemoryAllowedDomainRepository>();
 
         // HTTP delivery for webhooks
         services.AddHttpClient("webhook", c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddSingleton<IWebhookDeliveryService, HttpWebhookDeliveryService>();
+        // Consumes IWebhookRepository, which is scoped once persistence is enabled (#78).
+        services.AddScoped<IWebhookDeliveryService, HttpWebhookDeliveryService>();
 
         // #52 — NoSQL schema discoverer stubs (full implementations tracked in issues #53–#56)
         services.AddSingleton<INoSqlSchemaDiscoverer, CosmosDbSchemaDiscoverer>();
@@ -173,6 +252,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<INoSqlSchemaDiscoverer, DynamoDbSchemaDiscoverer>();
         services.AddSingleton<INoSqlSchemaDiscoverer, FirestoreSchemaDiscoverer>();
         services.AddSingleton<INoSqlSchemaDiscovererFactory, NoSqlSchemaDiscovererFactory>();
+
+        // #71 — the profiling half of #52's design. Aggregate-only: no adapter returns document content.
+        services.AddSingleton<INoSqlDataProfiler, MongoDbDataProfiler>();
+        services.AddSingleton<INoSqlDataProfiler, CosmosDbDataProfiler>();
+        services.AddSingleton<INoSqlDataProfiler, DynamoDbDataProfiler>();
+        services.AddSingleton<INoSqlDataProfiler, FirestoreDataProfiler>();
+        services.AddSingleton<INoSqlDataProfilerFactory, NoSqlDataProfilerFactory>();
 
         return services;
     }
@@ -203,10 +289,20 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ISecretCipher, DataProtectionSecretCipher>();
         services.AddSingleton<ILlmCredentialStore, InMemoryLlmCredentialStore>();
+
+        // #77 — usage attribution. Singleton in-memory by default; AddFabricatePersistence swaps in the EF
+        // adapter. The recorder alias lets the client factory depend on the write half alone.
+        services.TryAddSingleton<ILlmUsageRepository, InMemoryLlmUsageRepository>();
+        services.TryAddSingleton<ILlmUsageRecorder, ScopedLlmUsageRecorder>();
+        services.TryAddScoped<ILlmUsageService, LlmUsageService>();
+
+        // #83 — the prompt data boundary is stateless policy. Registered here as well as in the core
+        // registration because LlmCredentialService, which enforces the opt-in refusal, is registered here.
+        services.TryAddSingleton<IPromptDataBoundary, PromptDataBoundary>();
         services.AddSingleton<IChatCompletionClientFactory, ChatCompletionClientFactory>();
-        services.AddSingleton<ILlmCredentialProbe, ChatCompletionCredentialProbe>();
-        services.AddSingleton<ILlmCredentialResolver, LlmCredentialResolver>();
-        services.AddSingleton<ILlmCredentialService, LlmCredentialService>();
+        services.AddScoped<ILlmCredentialProbe, ChatCompletionCredentialProbe>();
+        services.AddScoped<ILlmCredentialResolver, LlmCredentialResolver>();
+        services.AddScoped<ILlmCredentialService, LlmCredentialService>();
         services.AddSingleton<ITokenBudgetEstimator, HeuristicTokenBudgetEstimator>();
 
         return services;

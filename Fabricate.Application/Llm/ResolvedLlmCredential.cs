@@ -2,9 +2,19 @@ using Fabricate.Domain.Models;
 
 namespace Fabricate.Application.Llm;
 
+/// <summary>
+/// Which rung of the resolver supplied the credential, in precedence order. The two personal rungs sit above the
+/// project one (#85): a member who has attached their own key means to use it, whatever the workspace also has.
+/// </summary>
 public enum LlmCredentialSource
 {
-    Project = 0,
+    /// <summary>Bound to one chat session by its owner.</summary>
+    SessionBound = 0,
+
+    /// <summary>Owned by the requesting member, for this workspace.</summary>
+    UserOwned,
+
+    Project,
     WorkspaceDefault,
     WorkspaceSingle,
     Platform

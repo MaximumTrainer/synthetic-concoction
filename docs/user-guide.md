@@ -625,6 +625,64 @@ A **Workspace** is scoped under an Account. It contains:
 
 Members can be added or removed via `POST /workspaces/{id}/members` and `DELETE /workspaces/{id}/members/{userId}`.
 
+### Connections
+
+A workspace connection points at a database the agent may introspect. The connection string is sent **once**, at
+creation, encrypted with the same cipher as LLM credentials, and never returned.
+
+```http
+POST /workspaces/{workspaceId}/connections
+{
+  "name": "warehouse",
+  "provider": "postgres",
+  "connectionString": "Host=db.internal;Username=app;Password=…;Database=prod"
+}
+```
+
+Supported providers: `sqlite`, `postgres` / `postgresql`. Anything else is a `400` naming the ones that work.
+
+| Route | Purpose |
+|---|---|
+| `GET /workspaces/{id}/connections` | Summaries: fingerprint, redacted target, status, last validation. |
+| `GET /workspaces/{id}/connections/{connectionId}` | One summary. Another workspace's id is `404`, never `403`. |
+| `POST …/{connectionId}/rotate` | Replaces the connection string. The old one is not recoverable. |
+| `POST …/{connectionId}/validate` | Opens the connection and reads metadata; reports reachability. |
+| `DELETE …/{connectionId}` | Removes it. |
+
+Every read returns a **summary**, never the connection string:
+
+```json
+{
+  "id": "3fa85f64-…",
+  "name": "warehouse",
+  "provider": "postgres",
+  "status": "active",
+  "fingerprint": "9f3c2a1b4d5e",
+  "redacted": "Host=db.internal;Username=***;Password=***;Database=prod",
+  "hasSecret": true,
+  "lastValidatedAt": "2026-09-05T12:00:00Z",
+  "lastValidationError": null
+}
+```
+
+The `redacted` form keeps the host and database so you can recognise which connection you are looking at, and
+drops every credential. The `fingerprint` is a short hash — enough to tell two connections apart and to see that a
+rotation happened, without being reversible.
+
+Validation opens the connection and reads metadata rather than pinging, because a ping can succeed where the
+credentials cannot actually read. A failure message is scrubbed before it is returned or logged: database drivers
+quote the connection string back in their errors more often than not.
+
+#### Which database a chat session sees
+
+1. The session's **project database**, when the project has an external database naming a workspace connection.
+2. The workspace's **single active connection**, when it has exactly one.
+3. Otherwise the **instance-level** `SchemaProvider` configuration — which is what keeps the CLI and single-tenant
+   self-hosting working exactly as before.
+
+With several connections and no project binding, discovery falls back to the configured default rather than
+guessing which of your databases to introspect.
+
 ### Projects
 
 A **Project** is scoped under a Workspace. It holds:
@@ -644,6 +702,77 @@ Account-level governance controls:
 | **Account Groups** | Logical groupings of members for access control. |
 | **Allowed Domains** | Allowlist of email domains for invitations. |
 | **Audit Log** | Append-only log of significant events (account/workspace/project changes, key operations). |
+
+#### Reading the audit log
+
+```http
+GET /accounts/{accountId}/audit?page=1&pageSize=50&action=workspace
+```
+
+Open to any member of the account. Events come back newest first.
+
+| Filter | Matches |
+|---|---|
+| `action` | Anywhere in the action name — `action=workspace` finds `workspace.created` and `workspace.access_granted`. |
+| `actionPrefix` | The start of the action name, which selects a whole family: `actionPrefix=chat.` or `actionPrefix=api.`. |
+| `apiKeyId` | Everything one API key did. |
+
+#### What is recorded
+
+| Action | When |
+|---|---|
+| `api.request` | Every authenticated request: which key called which **route template**, with method, status, scopes and duration. Anonymous endpoints (`/healthz`, Swagger) are not recorded. |
+| `chat.tool_invoked` | A tool call ran and succeeded. |
+| `chat.tool_failed` | A tool call ran and threw. |
+| `chat.tool_blocked` | A tool call was refused because the tool is not in the workspace allowlist. |
+| `chat.tool_requested` | A tool call was parked for review (`ReviewRequired` sessions). |
+| `chat.tool_approved` | A parked call was approved; the run that follows is audited separately. |
+| `chat.plan_stated` | The agent stated the steps it intends to take, before its first generating call. |
+| `chat.plan_revised` | The agent revised a plan it had already stated. |
+
+Two things are recorded deliberately narrowly:
+
+- **Route templates, not paths.** A path carries workspace, project and session identifiers;
+  `/workspaces/{workspaceId}/projects/{projectId}` says which endpoint was called without copying tenant
+  identifiers into a log that is exported and kept for months. Headers, query values and bodies are never recorded.
+- **Tool names, not payloads.** Tool arguments carry whatever the user or the model put in the prompt, and outputs
+  carry query results. Copying either into the account audit log would make it a second, longer-lived copy of the
+  conversation. The invocation id is recorded instead, so the payload stays reachable to anyone with the authority
+  to read it.
+
+`api.request` is on by default and can be sampled or switched off with `FABRICATE_API_USAGE_SAMPLING`; see
+[the self-hosting guide](how-to/self-hosting.md#audit-retention).
+
+#### Exporting the audit log
+
+```http
+GET /accounts/{accountId}/audit/export?from=2026-01-01T00:00:00Z&to=2026-09-01T00:00:00Z&format=json
+```
+
+**Account owners only** — members who can read the log through the query API cannot export it. The response is a
+download (`Content-Disposition: attachment`), streamed rather than buffered, so exporting a large account does not
+depend on it fitting in memory.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `from` | none | Only events at or after this instant. |
+| `to` | none | Only events at or before this instant. |
+| `format` | `json` | `json` for an array of events, `csv` for a header row plus one line per event. Anything else is a `400`. |
+
+The export contains the same events the query API returns, oldest first. One difference: every event's `details`
+field is **redacted on the way out**. The log is written by many call sites, so an export — a file that leaves the
+building — does not assume all of them got redaction right. Values are replaced with `[redacted]` wherever the key
+names something sensitive (`secret`, `password`, `token`, `apiKey`, `credential`, `fingerprint`, connection
+strings), and known provider key shapes are stripped even when they appear without a key name. Credential
+fingerprints are included deliberately: a fingerprint identifies a live key, and correlating one across accounts
+says which tenants share it. Non-sensitive detail — provider names, model names, target ids — survives, or the
+export would not be worth having.
+
+Redaction applies to the export only. The stored event is left as written, because rewriting history in place to
+hide a mistake is worse than the mistake.
+
+Operators can cap how long events are kept; see
+[Audit retention](how-to/self-hosting.md#audit-retention). Retention is off by default.
 
 ---
 
@@ -688,6 +817,32 @@ A provider refusal or failure is recorded as a `System` notice, never an error r
 | `Autonomous` | Run without confirmation. |
 | `ReviewRequired` | Parked as `Pending`; an Editor or Admin approves each one via `POST …/tool-invocations/{id}/approve`. Use this wherever `generate_data` has real side effects. |
 
+#### Asking rather than guessing
+
+The agent is told, per mode, when to ask instead of assuming. A request like *"generate some test data"* against a
+ten-table schema leaves the tables, the row counts and the compliance profile unstated, and guessing is the wrong
+default for a tool that writes data.
+
+| Mode | Behaviour when something is unspecified |
+|---|---|
+| `Guided` | Asks one specific question covering everything it needs, and makes no generating call until answered. A request that is already specific proceeds without asking. |
+| `Autonomous` | Chooses a sensible default and proceeds, **stating every assumption** in the reply so it can be corrected. |
+| `ReviewRequired` | Asks rather than parking a call the reviewer cannot judge, since a reviewer sees the call and not the reasoning. |
+
+The cases that trigger a question are: unspecified tables or row counts on a multi-table schema, an unspecified
+connection when the workspace has several, a compliance profile that would change what is produced, and anything
+that would overwrite existing data.
+
+#### Plans
+
+For a request needing more than one tool call, the agent calls `state_plan` with the steps it intends to take
+before the first call that generates or changes data, and calls it again with revised steps if it changes course.
+
+A plan is a tool call rather than prose so it lands where every other call does: a tool invocation carrying the
+steps, a message in the conversation, and an audit event — `chat.plan_stated` or `chat.plan_revised`. A revision
+therefore sits next to the calls it governs, in order, instead of being buried in an assistant message. As with
+every tool, the steps stay on the invocation and out of the audit log.
+
 ### Built-in Tools
 
 The agent has two built-in tools. Each workspace can be restricted to a subset (the allowlist is enforced server-side;
@@ -713,8 +868,67 @@ Each workspace can store **agent instructions** — a system prompt that is prep
 
 ### What is sent to the model
 
-Schema metadata (table, column and type names, relationships) and tool outputs. Row values from your databases are
-not read by the tools and are not sent.
+Schema metadata — table, column and type names, relationships — and tool outputs. **Row values are not sent**, and
+that is enforced rather than assumed: every tool declares what class of content its result carries, and a tool
+whose class the boundary forbids is not offered to the model at all.
+
+| Content class | May be sent |
+|---|---|
+| `Metadata` — names, shapes, run summaries | Always |
+| `AggregateStatistics` — histograms, distinct counts, min/max over real rows | Only with the workspace opt-in |
+| `SampledValues` — values copied from real rows | Only with the workspace opt-in |
+
+The opt-in is `allowSampledDataInPrompts` on the workspace LLM policy and defaults to false. It **cannot be
+enabled on a `Healthcare` or `Finance` workspace**: the request is refused with `409` and the policy is left
+unchanged. Every refusal is audited as `llm.boundary_blocked` with the tool name and content class, never the
+payload. See [the self-hosting guide](how-to/self-hosting.md#the-prompt-data-boundary).
+
+---
+
+## LLM usage and token budgets
+
+Every provider call is attributed to the workspace, project and session that caused it, and rolled up on demand.
+
+```http
+GET /workspaces/{workspaceId}/llm-usage?from=2026-09-01T00:00:00Z&to=2026-10-01T00:00:00Z&groupBy=model
+GET /accounts/{accountId}/llm-usage?groupBy=credential
+```
+
+The workspace view is open to any workspace member — it is their own consumption, and hiding it from the people
+doing the work is how a budget becomes a surprise. The account rollup spans workspaces the caller may not
+individually belong to, so it is **account owners only**. Both default to the last 30 days.
+
+| `groupBy` | Buckets by |
+|---|---|
+| `model` (default) | Model name. |
+| `credential` | Credential id. Calls made on the operator's platform credential bucket under `platform`, so they are not misattributed to a tenant's key. |
+| `day` | UTC date, `YYYY-MM-DD`. |
+
+Each bucket carries `inputTokens`, `outputTokens`, `totalTokens`, `calls` and `failedCalls`. **Cost is not
+returned** — prices change and differ by platform, so tokens are the unit.
+
+One record is written per provider *attempt*, not per turn. A call that fails and is retried writes a row for each
+try, flagged `RetriedFailure`, so a workspace whose calls keep failing is visible rather than silently slow.
+
+### Budgets
+
+`dailyTokenBudget` and `monthlyTokenBudget` on the workspace LLM policy cap consumption:
+
+```http
+PUT /workspaces/{workspaceId}/llm-credentials/policy
+{
+  "allowPlatformFallback": true,
+  "dailyTokenBudget": 200000,
+  "monthlyTokenBudget": 4000000
+}
+```
+
+Omit a field to leave it unchanged; send `-1` to clear the cap. Workspace admins only.
+
+Once a budget is reached the chat turn returns a `System` notice saying which budget was hit and when it resets,
+**and no provider call is made** — a budget that only reports after the fact is not a budget. The daily budget
+resets at 00:00 UTC and the monthly one at 00:00 UTC on the first of the month. When both are exceeded the daily
+one is reported, because it is the more actionable message.
 
 ---
 
@@ -747,6 +961,130 @@ Returns `{ "runId": "..." }`. Use `GET /runs/{runId}` or the TypeScript SDK's `p
 ### Skills
 
 Fabricate has a custom skill registry. Skills are callable units registered in the platform (analogous to OpenAPI-defined functions). The skill registry supports OpenAPI contract ingestion — import an external API spec and Fabricate will expose its operations as callable workflow steps.
+
+---
+
+## NoSQL discovery and profiling
+
+Fabricate discovers and profiles document stores as well as relational databases: **Cosmos DB, MongoDB, DynamoDB
+and Firestore**.
+
+```bash
+fabricate discover --provider mongodb --connection "mongodb://host:27017" --database clinic
+fabricate discover-profile --provider mongodb --connection "mongodb://host:27017" --database clinic
+```
+
+`discover` prints collection metadata — fields with inferred types, partition key, indexes. `discover-profile`
+prints a `NoSqlProfileSnapshot`: document count per collection, and per field its inferred type, non-null and null
+counts, a distinct-value estimate, and a minimum and maximum.
+
+### Connection strings
+
+Both commands take the same `--connection` for a given provider, and each provider's adapters read it the same
+way:
+
+| Provider | `--connection` | `--database` |
+| --- | --- | --- |
+| `mongodb` | A MongoDB connection string | Database name |
+| `cosmosdb` | `AccountEndpoint=…;AccountKey=…` | Database name |
+| `dynamodb` | `region=us-east-1`, optionally `;serviceUrl=http://localhost:8000` | A table-name prefix, or empty for all |
+| `firestore` | The GCP project id | Named database, or empty for `(default)` |
+
+Credentials are ambient wherever the provider offers it — an IAM role for DynamoDB, Application Default
+Credentials for Firestore — so no key need be stored. Two extra Cosmos keys exist for constrained networks and for
+the emulator: `ConnectionMode=Gateway` talks HTTPS to one endpoint instead of opening a range of TCP ports, and
+`DisableServerCertificateValidation=True` is accepted **only** for a loopback endpoint, so it cannot weaken a
+connection to a real account. DynamoDB Local and the Firestore emulator (`FIRESTORE_EMULATOR_HOST`) both work
+against the same adapters, unchanged.
+
+### What the metadata model does not have
+
+**No foreign-key graph.** Document stores do not declare relationships, so nothing can be inferred that the
+database itself does not know. The relational generator's referential integrity — parent rows before children,
+foreign keys pointing at real rows — has no equivalent here, and collection metadata carries no
+`ForeignKeySchema`. Relationships between collections are a matter of application convention, and Fabricate does
+not guess at them.
+
+Two further limits worth knowing:
+
+- **Fields come from a sample.** Up to 200 documents per collection. A field appearing only in older or rarer
+  documents may not be seen at all, and a field's type is whatever those documents showed — a field with more
+  than one type across documents is reported as `Unknown` rather than the first type seen.
+- **Counts are the provider's own.** MongoDB's estimated count and DynamoDB's `ItemCount` are both approximate by
+  the service's definition — DynamoDB's updates roughly every six hours. Cosmos DB and Firestore counts are exact
+  server-side aggregates.
+
+### Profiles never contain document content
+
+A profile is aggregates. Two consequences that are easy to miss:
+
+- **String fields report length, not value.** A string minimum and maximum are verbatim customer values, and on a
+  field with few distinct values they *are* the field's content — a free-text note column with one entry would
+  otherwise report that entry as both its minimum and its maximum. The length range carries the shape without the
+  content. Numbers, dates and identifiers report real minima and maxima, where the value is a measure rather than
+  a piece of text.
+- **Arrays and binary fields report length only**, and Mongo's `_id` is skipped, for the same reason.
+
+Distinct values are counted exactly up to 1000 and reported as 1000 beyond that: an exact count on a
+high-cardinality field would mean holding every value, which is the data itself.
+
+---
+
+## Generated APIs
+
+Ingest an OpenAPI contract, bind its operations to a generated dataset, and serve them — a mock API whose payloads
+come from your own generated data and match the contract you gave it.
+
+### POST /workspaces/{workspaceId}/api-contracts
+
+```json
+{ "name": "customers", "document": "{ \"openapi\": \"3.0.0\", ... }" }
+```
+
+Requires the workspace **Editor** role. Stores the contract and one endpoint per operation. A document that will
+not parse is a `400` carrying the parser's own reasons.
+
+### GET /workspaces/{workspaceId}/api-contracts
+### GET /workspaces/{workspaceId}/api-endpoints
+
+Each endpoint carries its `path`, `method`, `operationId`, the `responseKind` derived from the contract
+(`Collection` for an array response, `Item` for a single object on a path ending in a parameter), its binding, and
+`isServable`.
+
+### PATCH /workspaces/{workspaceId}/api-endpoints/{endpointId}
+
+```json
+{ "artifactRunId": "3fa85f64-...", "boundTable": "main.customers" }
+```
+
+Binds the endpoint to a table in a completed run, exported with the `json` format. Send `isActive` to toggle it,
+or `clearBinding: true` to unbind.
+
+The bound rows are checked against the contract's response schema **at bind time**, and any mismatch is stored on
+the endpoint as `diagnostics` — finding out when a client rejects the payload is the worst moment to learn it. An
+endpoint with a diagnostic is stored but not served, so a bad binding is visible rather than fatal.
+
+The check is deliberately narrow: required properties present, and declared primitive types not contradicted. That
+catches the mistake it exists for — binding to the wrong table — without a full JSON Schema implementation whose
+failures would be harder to act on than the mismatch.
+
+### GET /workspaces/{workspaceId}/mock/{path}
+
+```http
+GET /workspaces/{workspaceId}/mock/customers
+GET /workspaces/{workspaceId}/mock/customers/42
+```
+
+Matches the path against the contract's templates, preferring literal segments over parameters, and returns the
+bound rows: an array for a `Collection` operation, one row for an `Item` operation matched on the trailing path
+parameter. The `X-Fabricate-Operation` response header names the operation that answered.
+
+Everything that is not a live, bound, servable endpoint is a `404`: an unbound endpoint, an inactive one, an
+endpoint with diagnostics, a path outside the contract, a method the contract does not declare for that path, and
+an item id with no matching row.
+
+Mock routes use the same API-key authentication and rate limiting as the rest of the API, and each call is audited
+like any other request — a mock endpoint is still this instance serving a tenant's data.
 
 ---
 

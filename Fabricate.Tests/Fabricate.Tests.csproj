@@ -16,9 +16,14 @@
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Npgsql" Version="9.0.3" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.14.0" />
+    <PackageReference Include="Testcontainers.Minio" Version="4.14.0" />
+    <PackageReference Include="Testcontainers.MongoDb" Version="4.14.0" />
+    <PackageReference Include="Testcontainers.Azurite" Version="4.14.0" />
+    <PackageReference Include="Testcontainers.DynamoDb" Version="4.14.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
@@ -31,6 +36,8 @@
     <ProjectReference Include="..\Fabricate.Domain\Fabricate.Domain.csproj" />
     <ProjectReference Include="..\Fabricate.Application\Fabricate.Application.csproj" />
     <ProjectReference Include="..\Fabricate.Infrastructure\Fabricate.Infrastructure.csproj" />
+    <!-- #79: WebApplicationFactory boots the real API in-process for HTTP-level tests. -->
+    <ProjectReference Include="..\Fabricate.Api\Fabricate.Api.csproj" />
   </ItemGroup>
 
 </Project>

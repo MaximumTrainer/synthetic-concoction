@@ -72,41 +72,76 @@ const project = await client.createProject(workspace.id, &quot;Orders Dataset&qu
 <h4 id="getworkspace-workspaceid-string-promise-workspace"><code>getWorkspace(workspaceId: string): Promise&lt;Workspace&gt;</code></h4>
 <pre><code class="language-typescript">const workspace = await client.getWorkspace(&quot;9a3b2c1d-...&quot;);</code></pre>
 <h3 id="projects">Projects</h3>
+<p>Projects live inside a workspace, so every project method takes the <code>workspaceId</code> first.</p>
 <h4 id="createproject-workspaceid-string-name-string-promise-project"><code>createProject(workspaceId: string, name: string): Promise&lt;Project&gt;</code></h4>
 <pre><code class="language-typescript">const project = await client.createProject(workspace.id, &quot;Orders Dataset&quot;);</code></pre>
 <h4 id="listprojects-workspaceid-string-promise-project"><code>listProjects(workspaceId: string): Promise&lt;Project[]&gt;</code></h4>
 <pre><code class="language-typescript">const projects = await client.listProjects(workspace.id);</code></pre>
-<h4 id="getproject-projectid-string-promise-project"><code>getProject(projectId: string): Promise&lt;Project&gt;</code></h4>
-<pre><code class="language-typescript">const project = await client.getProject(&quot;proj-001&quot;);</code></pre>
-<h4 id="archiveproject-projectid-string-promise-void"><code>archiveProject(projectId: string): Promise&lt;void&gt;</code></h4>
-<pre><code class="language-typescript">await client.archiveProject(&quot;proj-001&quot;);</code></pre>
+<h4 id="getproject-workspaceid-string-projectid-string-promise-project"><code>getProject(workspaceId: string, projectId: string): Promise&lt;Project&gt;</code></h4>
+<pre><code class="language-typescript">const project = await client.getProject(workspace.id, &quot;proj-001&quot;);</code></pre>
+<h4 id="renameproject-workspaceid-string-projectid-string-name-string-promise-project"><code>renameProject(workspaceId: string, projectId: string, name: string): Promise&lt;Project&gt;</code></h4>
+<pre><code class="language-typescript">const renamed = await client.renameProject(workspace.id, &quot;proj-001&quot;, &quot;Orders (2026)&quot;);</code></pre>
+<h4 id="archiveproject-workspaceid-string-projectid-string-promise-project"><code>archiveProject(workspaceId: string, projectId: string): Promise&lt;Project&gt;</code></h4>
+<p>Returns the archived project; <code>status</code> becomes <code>&quot;Archived&quot;</code> and <code>archivedAt</code> is set.</p>
+<pre><code class="language-typescript">const archived = await client.archiveProject(workspace.id, &quot;proj-001&quot;);</code></pre>
+<h4 id="listprojectdatabases-workspaceid-projectid-promise-projectdatabase"><code>listProjectDatabases(workspaceId, projectId): Promise&lt;ProjectDatabase[]&gt;</code></h4>
+<h4 id="addprojectdatabase-workspaceid-projectid-name-type-provider-connectionrefid-promise-projectdatabase"><code>addProjectDatabase(workspaceId, projectId, { name, type, provider, connectionRefId? }): Promise&lt;ProjectDatabase&gt;</code></h4>
+<p><code>type</code> is <code>&quot;Local&quot;</code> or <code>&quot;External&quot;</code>.</p>
+<pre><code class="language-typescript">const database = await client.addProjectDatabase(workspace.id, project.id, {
+  name: &quot;warehouse&quot;,
+  type: &quot;External&quot;,
+  provider: &quot;postgres&quot;,
+});</code></pre>
+<h4 id="saveprojectinstruction-workspaceid-projectid-content-promise-instructionversion"><code>saveProjectInstruction(workspaceId, projectId, content): Promise&lt;InstructionVersion&gt;</code></h4>
+<h4 id="getprojectinstruction-workspaceid-projectid-promise-instructionversion"><code>getProjectInstruction(workspaceId, projectId): Promise&lt;InstructionVersion&gt;</code></h4>
+<p>Instructions are versioned; saving appends a version rather than replacing one.</p>
 <h3 id="dataset-runs">Dataset Runs</h3>
-<h4 id="listruns-projectid-string-page-number-pagesize-number-promise-paginatedresult-datasetrun"><code>listRuns(projectId: string, page?: number, pageSize?: number): Promise&lt;PaginatedResult&lt;DatasetRun&gt;&gt;</code></h4>
-<pre><code class="language-typescript">const page = await client.listRuns(project.id, 1, 20);
-console.log(page.items.length, page.totalCount);</code></pre>
-<h4 id="getrun-runid-string-promise-datasetrun"><code>getRun(runId: string): Promise&lt;DatasetRun&gt;</code></h4>
-<pre><code class="language-typescript">const run = await client.getRun(&quot;run-abc123&quot;);
+<h4 id="startrun-workspaceid-string-request-startrunrequest-promise-datasetrun"><code>startRun(workspaceId: string, request: StartRunRequest): Promise&lt;DatasetRun&gt;</code></h4>
+<p>Starts a generation run and returns it once complete. Requires the workspace <strong>Editor</strong> role.</p>
+<pre><code class="language-typescript">const run = await client.startRun(workspace.id, {
+  rowCounts: { &quot;main.users&quot;: 500 },
+  seed: 4242,
+  schemaSnapshotId: snapshot.id,
+  exporters: [&quot;csv&quot;, &quot;json&quot;],
+});</code></pre>
+<h4 id="listartifacts-workspaceid-string-runid-string-promise-runartifact"><code>listArtifacts(workspaceId: string, runId: string): Promise&lt;RunArtifact[]&gt;</code></h4>
+<p>The run's manifest: <code>name</code>, <code>sizeBytes</code>, <code>sha256</code> and <code>contentType</code> per file.</p>
+<h4 id="downloadartifact-workspaceid-string-runid-string-name-string-promise-arraybuffer"><code>downloadArtifact(workspaceId: string, runId: string, name: string): Promise&lt;ArrayBuffer&gt;</code></h4>
+<p>Downloads one artifact as raw bytes. <code>name</code> carries the exporter directory, so it contains slashes.</p>
+<pre><code class="language-typescript">const artifacts = await client.listArtifacts(workspace.id, run.id);
+const bytes = await client.downloadArtifact(workspace.id, run.id, artifacts[0].name);</code></pre>
+<h4 id="listruns-workspaceid-string-page-number-pagesize-number-promise-datasetrun"><code>listRuns(workspaceId: string, page?: number, pageSize?: number): Promise&lt;DatasetRun[]&gt;</code></h4>
+<p>Returns a bare array — the API does not wrap runs in a pagination envelope. Page defaults to 1, page size to 20.</p>
+<pre><code class="language-typescript">const runs = await client.listRuns(workspace.id, 1, 20);
+console.log(runs.length);</code></pre>
+<h4 id="getrun-workspaceid-string-runid-string-promise-datasetrun"><code>getRun(workspaceId: string, runId: string): Promise&lt;DatasetRun&gt;</code></h4>
+<pre><code class="language-typescript">const run = await client.getRun(workspace.id, &quot;run-abc123&quot;);
 console.log(run.status); // &quot;Queued&quot; | &quot;Running&quot; | &quot;Completed&quot; | &quot;Failed&quot; | &quot;Cancelled&quot;</code></pre>
-<h4 id="cancelrun-runid-string-promise-void"><code>cancelRun(runId: string): Promise&lt;void&gt;</code></h4>
-<pre><code class="language-typescript">await client.cancelRun(&quot;run-abc123&quot;);</code></pre>
-<h4 id="pollrun-runid-string-options-intervalms-number-timeoutms-number-promise-datasetrun"><code>pollRun(runId: string, options?: { intervalMs?: number; timeoutMs?: number }): Promise&lt;DatasetRun&gt;</code></h4>
-<p>Polls a run at <code>intervalMs</code> (default 2 000ms) until it reaches a terminal state (<code>Completed</code>, <code>Failed</code>, <code>Cancelled</code>).</p>
-<ul><li>Throws <code>FabricateError</code> if the run fails or is cancelled.</li><li>Throws <code>FabricateError</code> if polling times out (default <code>timeoutMs = 120 000ms</code>).</li></ul>
-<pre><code class="language-typescript">const workflowResult = await client.runWorkflow(workflowId);
-const completedRun = await client.pollRun(workflowResult.runId, {
-  intervalMs: 3000,
-  timeoutMs: 300_000,
-});
-console.log(`Run completed at ${completedRun.completedAt}`);</code></pre>
+<h4 id="cancelrun-workspaceid-string-runid-string-promise-datasetrun"><code>cancelRun(workspaceId: string, runId: string): Promise&lt;DatasetRun&gt;</code></h4>
+<p>Returns the cancelled run. Throws <code>FabricateError</code> with <code>status === 409</code> if the run already reached a terminal state.</p>
+<pre><code class="language-typescript">const cancelled = await client.cancelRun(workspace.id, &quot;run-abc123&quot;);</code></pre>
+<h4 id="pollrun-runid-string-intervalms-number-timeoutms-number-promise-datasetrun"><code>pollRun(workspaceId: string, runId: string, intervalMs?: number, timeoutMs?: number): Promise&lt;DatasetRun&gt;</code></h4>
+<p>Polls a run every <code>intervalMs</code> (default 2 000ms) until it reaches a terminal state.</p>
+<ul><li>Throws <code>FabricateError</code> if the run fails or is cancelled.</li><li>Throws <code>FabricateError</code> if polling times out (default <code>timeoutMs = 300 000ms</code>).</li></ul>
+<pre><code class="language-typescript">const run = await client.runWorkflow(workspace.id, workflow.id);
+const completed = await client.pollRun(workspace.id, run.id, 3000, 300_000);
+console.log(`Run completed at ${completed.completedAt}`);</code></pre>
 <h3 id="workflows">Workflows</h3>
-<h4 id="createworkflow-workspaceid-string-name-string-steps-unknown-promise-workflow"><code>createWorkflow(workspaceId: string, name: string, steps: unknown[]): Promise&lt;Workflow&gt;</code></h4>
+<p>Workflows are workspace-scoped, so every workflow method takes the <code>workspaceId</code> first.</p>
+<h4 id="createworkflow-workspaceid-string-name-string-steps-workflowstepinput-promise-workflow"><code>createWorkflow(workspaceId: string, name: string, steps: WorkflowStepInput[]): Promise&lt;Workflow&gt;</code></h4>
+<p>Each step is <code>{ stepOrder, stepType, configuration? }</code>, where <code>configuration</code> is a provider-specific JSON string.</p>
 <pre><code class="language-typescript">const workflow = await client.createWorkflow(workspace.id, &quot;Nightly Refresh&quot;, [
-  { type: &quot;generate&quot;, rows: 500 },
-  { type: &quot;export&quot;, format: &quot;sql&quot; },
+  { stepOrder: 1, stepType: &quot;generate&quot;, configuration: '{&quot;rows&quot;:500}' },
+  { stepOrder: 2, stepType: &quot;export&quot;, configuration: '{&quot;format&quot;:&quot;sql&quot;}' },
 ]);</code></pre>
-<h4 id="runworkflow-workflowid-string-promise-runid-string"><code>runWorkflow(workflowId: string): Promise&lt;{ runId: string }&gt;</code></h4>
-<pre><code class="language-typescript">const { runId } = await client.runWorkflow(workflow.id);
-const run = await client.pollRun(runId);</code></pre>
+<h4 id="runworkflow-workspaceid-string-workflowid-string-promise-workflowrun"><code>runWorkflow(workspaceId: string, workflowId: string): Promise&lt;WorkflowRun&gt;</code></h4>
+<p>Returns the whole run record, not just an id.</p>
+<pre><code class="language-typescript">const run = await client.runWorkflow(workspace.id, workflow.id);
+const completed = await client.pollRun(workspace.id, run.id);</code></pre>
+<h4 id="getworkflowrun-workspaceid-workflowid-runid-promise-workflowrun"><code>getWorkflowRun(workspaceId, workflowId, runId): Promise&lt;WorkflowRun&gt;</code></h4>
+<h4 id="getworkflowstepruns-workspaceid-workflowid-runid-promise-workflowsteprun"><code>getWorkflowStepRuns(workspaceId, workflowId, runId): Promise&lt;WorkflowStepRun[]&gt;</code></h4>
+<h4 id="disableworkflow-workspaceid-workflowid-promise-workflow"><code>disableWorkflow(workspaceId, workflowId): Promise&lt;Workflow&gt;</code></h4>
+<p>Sets the workflow's <code>status</code> to <code>&quot;Disabled&quot;</code>; scheduled runs stop firing.</p>
 <h3 id="chat">Chat</h3>
 <p>Chat is answered by the LLM the workspace is configured to use — a credential the workspace registered (<a href="byok-llm-credentials.html">bring your own key</a>) or, where allowed, the operator's platform credential. All chat methods take the <code>workspaceId</code> first.</p>
 <h4 id="createchatsession-workspaceid-name-projectid-mode-promise-chatsession"><code>createChatSession(workspaceId, name, { projectId?, mode? }): Promise&lt;ChatSession&gt;</code></h4>
@@ -153,7 +188,8 @@ await client.revokeLlmCredential(workspace.id, credential.id);                  
 await client.setWorkspaceLlmPolicy(workspace.id, { allowPlatformFallback: false, allowedTools: [&quot;discover_schema&quot;] });</code></pre>
 <p>An OpenAI-compatible endpoint (OpenAI, Azure OpenAI, vLLM, Ollama, gateways) uses <code>provider: "OpenAiCompatible"</code> with a public HTTPS <code>endpoint</code>; Bedrock and Vertex use <code>kind: "CloudIdentity"</code> with <code>nonSecretSettings</code> (<code>region</code> / <code>projectId</code>, <code>location</code>) and no secret.</p>
 <h3 id="api-keys">API Keys</h3>
-<h4 id="createapikey-accountid-displayname-scopes-expiresat-promise-apikeycreateresult"><code>createApiKey(accountId, displayName, scopes, expiresAt?): Promise&lt;ApiKeyCreateResult&gt;</code></h4>
+<h4 id="createapikey-accountid-name-scopes-expiry-promise-apikeycreateresult"><code>createApiKey(accountId, name, scopes, expiry?): Promise&lt;ApiKeyCreateResult&gt;</code></h4>
+<p><code>expiry</code> is a <em>lifetime</em>, not an instant: <code>{ days?, hours? }</code>, sent to the API as a .NET <code>TimeSpan</code>. Omit it for a key that never expires. The plaintext <code>secret</code> is on the result and is never returned again.</p>
 <pre><code class="language-typescript">const result = await client.createApiKey(
   account.id,
   &quot;ci-pipeline&quot;,
@@ -163,8 +199,9 @@ await client.setWorkspaceLlmPolicy(workspace.id, { allowPlatformFallback: false,
 console.log(result.secret); // cnc_abc123... — shown once only</code></pre>
 <h4 id="listapikeys-accountid-string-promise-apikey"><code>listApiKeys(accountId: string): Promise&lt;ApiKey[]&gt;</code></h4>
 <pre><code class="language-typescript">const keys = await client.listApiKeys(account.id);</code></pre>
-<h4 id="revokeapikey-keyid-string-promise-void"><code>revokeApiKey(keyId: string): Promise&lt;void&gt;</code></h4>
-<pre><code class="language-typescript">await client.revokeApiKey(&quot;3fa85f64-...&quot;);</code></pre>
+<h4 id="revokeapikey-accountid-string-keyid-string-promise-apikey"><code>revokeApiKey(accountId: string, keyId: string): Promise&lt;ApiKey&gt;</code></h4>
+<p>Issues a <code>DELETE</code> and returns the revoked key.</p>
+<pre><code class="language-typescript">const revoked = await client.revokeApiKey(account.id, &quot;3fa85f64-...&quot;);</code></pre>
 <h2 id="error-handling">Error Handling</h2>
 <p>All HTTP errors throw <code>FabricateError</code>:</p>
 <pre><code class="language-typescript">try {
@@ -201,7 +238,6 @@ console.log(result.secret); // cnc_abc123... — shown once only</code></pre>
   LlmCredentialSummary,
   LlmCredentialValidationResult,
   LlmProvider,
-  PaginatedResult,
   Project,
   RegisterLlmCredentialRequest,
   TokenUsage,

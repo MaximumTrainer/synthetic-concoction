@@ -4,18 +4,16 @@ using Fabricate.Domain.Models;
 namespace Fabricate.Application.Governance;
 
 public sealed class AccountGroupService(
+    IAccountGroupRepository groupRepository,
     IAccountRepository accountRepository,
     IAuditLogService auditLogService) : IAccountGroupService
 {
-    private readonly List<AccountGroup> _groups = [];
-    private readonly List<GroupMembership> _memberships = [];
-
     public async Task<AccountGroup> CreateGroupAsync(Guid accountId, string name, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         await RequireOwnerAsync(accountId, createdByUserId, cancellationToken).ConfigureAwait(false);
 
         var group = new AccountGroup(Guid.NewGuid(), accountId, name, DateTimeOffset.UtcNow);
-        _groups.Add(group);
+        await groupRepository.SaveAsync(group, cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), accountId, createdByUserId,
@@ -28,7 +26,7 @@ public sealed class AccountGroupService(
     public async Task AddGroupMemberAsync(Guid groupId, Guid userId, Guid requestingUserId, Guid accountId, CancellationToken cancellationToken = default)
     {
         await RequireOwnerAsync(accountId, requestingUserId, cancellationToken).ConfigureAwait(false);
-        _memberships.Add(new GroupMembership(groupId, userId, DateTimeOffset.UtcNow));
+        await groupRepository.AddMemberAsync(new GroupMembership(groupId, userId, DateTimeOffset.UtcNow), cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), accountId, requestingUserId,
@@ -39,7 +37,7 @@ public sealed class AccountGroupService(
     public async Task RemoveGroupMemberAsync(Guid groupId, Guid userId, Guid requestingUserId, Guid accountId, CancellationToken cancellationToken = default)
     {
         await RequireOwnerAsync(accountId, requestingUserId, cancellationToken).ConfigureAwait(false);
-        _memberships.RemoveAll(m => m.GroupId == groupId && m.UserId == userId);
+        await groupRepository.RemoveMemberAsync(groupId, userId, cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), accountId, requestingUserId,
@@ -48,7 +46,7 @@ public sealed class AccountGroupService(
     }
 
     public Task<IReadOnlyList<AccountGroup>> ListGroupsAsync(Guid accountId, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<AccountGroup>>(_groups.Where(g => g.AccountId == accountId).ToArray());
+        => groupRepository.ListByAccountAsync(accountId, cancellationToken);
 
     private async Task RequireOwnerAsync(Guid accountId, Guid userId, CancellationToken cancellationToken)
     {

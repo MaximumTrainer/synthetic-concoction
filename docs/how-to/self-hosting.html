@@ -32,9 +32,32 @@
 <tr><td><code>FABRICATE_CONNECTION_STRING</code></td><td>with <code>postgres</code></td><td>PostgreSQL connection string. Carries credentials — set it as a <strong>secret</strong>.</td></tr>
 <tr><td><code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code></td><td>recommended</td><td>Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances; see <a href="#key-ring">Key ring</a>.</td></tr>
 <tr><td><code>ASPNETCORE_URLS</code></td><td>no</td><td>Defaults to <code>http://+:8080</code> in the image. TLS is terminated by your platform.</td></tr>
-<tr><td><code>FABRICATE_ARTIFACTS_PATH</code></td><td>no</td><td>Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart. Object storage is a tracked follow-up.</td></tr>
+<tr><td><code>FABRICATE_API_RATE_LIMIT_PER_MINUTE</code></td><td>no</td><td>Requests per minute per API key across every authenticated route (default 100). <code>/healthz</code> and Swagger are exempt. Exceeding it returns <code>429</code> with <code>Retry-After</code>.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACTS_PATH</code></td><td>no</td><td>Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart, or use object storage (below).</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_STORE</code></td><td>no</td><td><code>filesystem</code> (default) or <code>s3</code>. See <a href="#artifact-storage">Artifact storage</a>.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_BUCKET</code></td><td>with <code>s3</code></td><td>Bucket generated artifacts are written to.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_S3_ENDPOINT</code></td><td>for non-AWS</td><td>Endpoint URL for MinIO, Cloudflare R2 or Backblaze B2. Unset means AWS.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_S3_REGION</code></td><td>for AWS</td><td>Region. Still required by request signing even where the store ignores it.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE</code></td><td>for non-AWS</td><td><code>true</code> for MinIO and most S3-compatible stores, which do not support virtual-host addressing.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_S3_ACCESS_KEY_SECRET</code></td><td>no</td><td>Secret <strong>name</strong> holding the access key. Omit both key variables to use ambient cloud identity.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET</code></td><td>no</td><td>Secret <strong>name</strong> holding the secret key.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_AZURE_ACCOUNT_URL</code></td><td>with <code>azure-blob</code></td><td>Storage account URL, e.g. <code>https://acme.blob.core.windows.net</code>. Used with managed identity.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_AZURE_CONNECTION_STRING_SECRET</code></td><td>no</td><td>Secret <strong>name</strong> holding a connection string, for running outside Azure. Omit to use managed identity.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_GCS_PROJECT_ID</code></td><td>no</td><td>GCP project id. Usually supplied by Application Default Credentials.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_GCS_CREDENTIALS_SECRET</code></td><td>no</td><td>Secret <strong>name</strong> holding service-account key JSON, for running outside GCP. Omit to use ADC.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_RETENTION_DAYS</code></td><td>no</td><td>Days to keep generated artifacts. Default <code>0</code> keeps them.</td></tr>
+<tr><td><code>FABRICATE_AUDIT_RETENTION_DAYS</code></td><td>no</td><td>Days of audit history to keep. <strong>Default <code>0</code> keeps everything</strong>, so an existing deployment never starts deleting on upgrade. Set it and a background sweep purges anything older; see <a href="#audit-retention">Audit retention</a>.</td></tr>
+<tr><td><code>FABRICATE_AUDIT_SWEEP_MINUTES</code></td><td>no</td><td>How often the retention sweep runs (default 360, six hours). Only read when retention is enabled.</td></tr>
+<tr><td><code>FABRICATE_AUDIT_PURGE_BATCH_SIZE</code></td><td>no</td><td>Rows deleted per statement (default 1000), so clearing a long backlog does not hold one long write lock.</td></tr>
+<tr><td><code>FABRICATE_API_USAGE_SAMPLING</code></td><td>no</td><td>Fraction of authenticated requests recorded as <code>api.request</code> audit events, 0.0–1.0. Default <code>1.0</code> records every request; <code>0</code> switches per-request usage auditing off. A busy deployment that wants the signal without the volume can sample — but note a sampled log cannot answer "did this key call that endpoint", only "how often, roughly".</td></tr>
 </tbody>
 </table>
+<h3 id="audit-retention">Audit retention</h3>
+<p>Audit events are insert-only and otherwise grow forever, which on a hosted deployment eventually costs more than the log is worth. Retention is <strong>off by default</strong>: <code>FABRICATE_AUDIT_RETENTION_DAYS=0</code> keeps every event.</p>
+<p>Setting it to a positive number starts a background sweep that deletes events strictly older than the window, across every account, in batches. An event exactly on the boundary is kept. The sweep audits itself as <code>audit.retention_applied</code>, recording the window, the cutoff and the number removed — and records nothing when it deleted nothing, so an idle sweep does not become its own source of growth.</p>
+<pre><code class="language-bash">FABRICATE_AUDIT_RETENTION_DAYS=90    # keep a quarter of history
+FABRICATE_AUDIT_SWEEP_MINUTES=360    # sweep every six hours (the default)</code></pre>
+<p>Deleting audit history may itself be regulated in your jurisdiction. Export before you shorten a window — see <a href="../user-guide.html#exporting-the-audit-log">Exporting the audit log</a> — and keep the export somewhere the retention window does not reach.</p>
 <p>Pending EF Core migrations are applied automatically at startup, so a fresh database needs no manual step. Several instances starting at once apply the schema exactly once (EF Core's migration lock).</p>
 <h3 id="operator-platform-llm-credential-fabricate-llm">Operator (platform) LLM credential — <code>FABRICATE_LLM_*</code></h3>
 <p>Optional. Leave <code>FABRICATE_LLM_PROVIDER</code> unset and the platform credential is disabled; workspaces can still <a href="byok-llm-credentials.html">bring their own keys</a>. If it <strong>is</strong> set and invalid, the API refuses to start and names the offending variable.</p>
@@ -69,6 +92,44 @@
 <p>Bedrock model ids take the <code>anthropic.</code> prefix (e.g. <code>anthropic.claude-opus-5</code>); Vertex uses the bare id.</p>
 <h3 id="which-credential-a-chat-turn-uses">Which credential a chat turn uses</h3>
 <p>Project-bound credential → workspace default for the provider → the workspace's single active credential → the platform credential (only where <code>FABRICATE_LLM_PLATFORM_FALLBACK</code> allows) → none, in which case the chat returns a clear notice and the direct <code>/tool</code> commands still work.</p>
+<h3 id="whether-the-agent-asks-before-it-acts">Whether the agent asks before it acts</h3>
+<p>In <code>Guided</code> mode the agent is instructed to ask rather than guess when a request leaves the row counts, the target database or the compliance profile open, or when it would overwrite existing data. Whether a given model actually does that is the model's judgement, not something the code can enforce, so it is measured rather than asserted: <code>AgentClarificationLiveEvalTests</code> runs seven fixtures through a real model and reports how many behaved as expected. The <code>integration-tests</code> workflow runs it weekly and on dispatch; see <a href="ci-integration-secrets.html">CI secrets for integration tests</a>.</p>
+<table>
+<thead><tr><th>Model</th><th>Fixtures as expected</th><th>Last verified</th></tr></thead>
+<tbody>
+<tr><td><code>claude-opus-5</code></td><td><em>not yet run</em> — needs <code>FABRICATE_LIVE_LLM_API_KEY</code></td><td>—</td></tr>
+</tbody>
+</table>
+<p>The eval fails below 6/7. One fixture going the other way is a model exercising judgement; two is the guidance no longer landing. <strong>Until a row above carries a rate, treat "the agent asks clarifying questions" as designed for and unverified</strong> — the prompt contract and the harness are covered offline, the behaviour is not.</p>
+<h3 id="artifact-storage">Artifact storage</h3>
+<p>Generated artifacts default to the local file system (<code>FABRICATE_ARTIFACTS_PATH</code>, else the OS temp directory). That is right for local use and <strong>wrong on every hosted target</strong>: Fly machines are replaced, Cloud Run and Container Apps revisions are immutable, ECS tasks restart. The files disappear and a completed run is left pointing at artifacts that no longer exist.</p>
+<p>Set <code>FABRICATE_ARTIFACT_STORE</code> to use object storage instead. Three adapters cover the field: <code>s3</code> for <strong>AWS S3, MinIO, Cloudflare R2 and Backblaze B2</strong> (one API between them), <code>azure-blob</code> for <strong>Azure Blob Storage</strong>, and <code>gcs</code> for <strong>Google Cloud Storage</strong>.</p>
+<p>GCS and R2 both offer S3-compatible modes, so the <code>s3</code> adapter can reach them — but those modes need HMAC keys, which is exactly the stored credential the native adapters avoid. On Azure and GCP, prefer the native one.</p>
+<pre><code class="language-bash"># AWS S3, using the task or instance role — no keys stored anywhere
+FABRICATE_ARTIFACT_STORE=s3
+FABRICATE_ARTIFACT_BUCKET=acme-fabricate-artifacts
+FABRICATE_ARTIFACT_S3_REGION=eu-west-1
+
+# MinIO, Cloudflare R2 or Backblaze B2
+FABRICATE_ARTIFACT_STORE=s3
+FABRICATE_ARTIFACT_BUCKET=fabricate-artifacts
+FABRICATE_ARTIFACT_S3_ENDPOINT=https://s3.example.internal
+FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE=true
+FABRICATE_ARTIFACT_S3_ACCESS_KEY_SECRET=ARTIFACT_ACCESS_KEY
+FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET=ARTIFACT_SECRET_KEY
+
+# Azure Blob, using managed identity - no keys stored anywhere
+FABRICATE_ARTIFACT_STORE=azure-blob
+FABRICATE_ARTIFACT_BUCKET=fabricate-artifacts        # the container name
+FABRICATE_ARTIFACT_AZURE_ACCOUNT_URL=https://acme.blob.core.windows.net
+
+# Google Cloud Storage, using Application Default Credentials - likewise no keys
+FABRICATE_ARTIFACT_STORE=gcs
+FABRICATE_ARTIFACT_BUCKET=acme-fabricate-artifacts</code></pre>
+<p><strong>Credentials.</strong> Ambient cloud identity first on all three — an IAM role on ECS or EKS, managed identity on Azure, Application Default Credentials on GCP — because that means no key is stored anywhere at all. The <code>*_SECRET</code> variables are the fallback for running outside the cloud in question, and they hold the <em>name</em> of a secret, not its value, so artifact credentials follow the same path as every other secret. Supplying an S3 access key without its secret key is refused at startup rather than falling through to ambient credentials and failing later with an unrelated permissions error.</p>
+<p>The configuration is validated when the container is built, so a mistake stops the instance starting rather than being discovered by the first person to generate data.</p>
+<p><strong>Uploads and downloads stream.</strong> Size and SHA-256 are computed as the bytes pass through and stored as object metadata, which is what lets the run manifest be served without reading the blobs.</p>
+<p><strong>Retention.</strong> <code>FABRICATE_ARTIFACT_RETENTION_DAYS</code> defaults to <code>0</code>, keeping everything. A positive value starts a sweep that deletes the artifacts of runs older than the window; the run record keeps its checksums — still the record of what was produced — but reports an empty artifact manifest rather than paths that no longer resolve. Where your object store offers a lifecycle policy, configuring one on the bucket is cheaper than this sweep and does the same job; the sweep exists for stores that do not, and for operators who prefer the rule in one place.</p>
 <h2 id="one-command-locally">One command locally</h2>
 <pre><code class="language-bash">cp .env.example .env        # fill in FABRICATE__BootstrapApiKey and your LLM key
 docker compose up --build
@@ -103,7 +164,21 @@ curl -s http://localhost:8080/healthz</code></pre>
 <tr><td>Databases you point schema discovery at</td><td>when you run discovery</td></tr>
 </tbody>
 </table>
-<p>Selecting <code>openai-compatible</code> with a private base URL and <code>FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS=true</code> yields an instance that makes no calls outside your network. Schema metadata (table, column, type and relationship names) is sent to the model as tool output; row values are not.</p>
+<p>Selecting <code>openai-compatible</code> with a private base URL and <code>FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS=true</code> yields an instance that makes no calls outside your network.</p>
+<h3 id="the-prompt-data-boundary">The prompt data boundary</h3>
+<p>What may reach a model provider is enforced in code, not left to convention. Every tool declares the most sensitive class of content its result can carry, and a tool whose class the boundary forbids is <strong>never offered to the model</strong> — so the model cannot ask for it and be refused halfway through a turn, which would both disclose that the data exists and leave the user with a broken conversation.</p>
+<table>
+<thead><tr><th>Content class</th><th>What it is</th><th>When it may be sent</th></tr></thead>
+<tbody>
+<tr><td><code>Metadata</code></td><td>Table, column, type and relationship names; run summaries. Describes the data rather than containing it.</td><td>Always. Without it the agent is useless.</td></tr>
+<tr><td><code>AggregateStatistics</code></td><td>Histograms, distinct counts, min/max over real rows. No single row is disclosed, but a min/max is a real value and a histogram over a small table can identify individuals.</td><td>Only with the workspace opt-in.</td></tr>
+<tr><td><code>SampledValues</code></td><td>Values copied from real rows — samples, examples, few-shot rows.</td><td>Only with the workspace opt-in.</td></tr>
+</tbody>
+</table>
+<p>The opt-in is <code>allowSampledDataInPrompts</code> on the workspace LLM policy (<code>PUT /workspaces/{id}/llm-credentials/policy</code>), and it defaults to <strong>false</strong>.</p>
+<p><strong>It cannot be enabled at all on a <code>Healthcare</code> or <code>Finance</code> workspace.</strong> The request is refused with <code>409</code> and an explanation, and the policy is left exactly as it was — refused rather than silently ignored, because an administrator told "saved" while the setting did not take is worse off than one told why it cannot be. A workspace's compliance profile is fixed when it is created. The profile is also re-checked at every decision, so an opt-in written before a profile changed does not survive the change.</p>
+<p>Every refusal is audited as <code>llm.boundary_blocked</code> with the tool name and content class, and never the payload.</p>
+<p>Today's tools all return <code>Metadata</code>, so the boundary changes nothing for them. It exists ahead of the tools that will need it — NoSQL discovery samples documents to infer field types, data profilers compute per-column statistics, and any future "explain this data" tool sends values by construction.</p>
 <h2 id="cost-fly-reference-configuration">Cost (Fly reference configuration)</h2>
 <p>Assumptions: one <code>shared-cpu-1x</code> 512 MB machine that stops when idle, the smallest PostgreSQL plan, light usage. The database is the floor of the bill because it does not scale to zero; an external free-tier PostgreSQL (e.g. Neon) is the lowest-cost option. Check Fly's current pricing page for figures — they change more often than this document.</p>
 <h2 id="health-and-readiness">Health and readiness</h2>

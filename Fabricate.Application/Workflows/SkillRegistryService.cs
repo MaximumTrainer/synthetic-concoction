@@ -3,27 +3,23 @@ using Fabricate.Domain.Models;
 
 namespace Fabricate.Application.Workflows;
 
-public sealed class SkillRegistryService : ISkillRegistry
+public sealed class SkillRegistryService(ISkillRepository skillRepository) : ISkillRegistry
 {
-    private readonly List<Skill> _skills = [];
-
-    public Task RegisterSkillAsync(Skill skill, Guid requestingUserId, CancellationToken cancellationToken = default)
-    {
-        _skills.RemoveAll(s => s.Id == skill.Id);
-        _skills.Add(skill);
-        return Task.CompletedTask;
-    }
+    public async Task RegisterSkillAsync(Skill skill, Guid requestingUserId, CancellationToken cancellationToken = default)
+        => await skillRepository.SaveAsync(skill, cancellationToken).ConfigureAwait(false);
 
     public Task<Skill?> GetSkillAsync(Guid skillId, CancellationToken cancellationToken = default)
-        => Task.FromResult(_skills.Find(s => s.Id == skillId));
+        => skillRepository.GetByIdAsync(skillId, cancellationToken);
 
-    public Task<IReadOnlyList<Skill>> ListSkillsAsync(Guid workspaceId, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<Skill>>(_skills.Where(s => s.WorkspaceId == workspaceId && s.IsEnabled).ToArray());
-
-    public Task<bool> IsToolAllowedAsync(Guid skillId, string toolName, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<Skill>> ListSkillsAsync(Guid workspaceId, CancellationToken cancellationToken = default)
     {
-        var skill = _skills.Find(s => s.Id == skillId);
-        if (skill is null) return Task.FromResult(false);
-        return Task.FromResult(skill.AllowedTools.Contains(toolName, StringComparer.OrdinalIgnoreCase));
+        var skills = await skillRepository.ListByWorkspaceAsync(workspaceId, cancellationToken).ConfigureAwait(false);
+        return skills.Where(s => s.IsEnabled).ToArray();
+    }
+
+    public async Task<bool> IsToolAllowedAsync(Guid skillId, string toolName, CancellationToken cancellationToken = default)
+    {
+        var skill = await skillRepository.GetByIdAsync(skillId, cancellationToken).ConfigureAwait(false);
+        return skill is not null && skill.AllowedTools.Contains(toolName, StringComparer.OrdinalIgnoreCase);
     }
 }

@@ -116,6 +116,7 @@ test("LLM credential lifecycle uses the documented routes and verbs", async () =
     id: "c1", workspaceId: "ws1", projectId: null, name: "team", provider: "Anthropic", kind: "ApiKey",
     fingerprint: "9f3c", lastFour: "a1b2", endpoint: null, model: "claude-opus-5", nonSecretSettings: {},
     isDefault: true, status: "Active", createdAt: "2026-09-03T00:00:00Z", lastValidatedAt: null, lastUsedAt: null, revokedAt: null,
+    ownerUserId: null, sessionId: null, isPersonal: false,
   };
   const { fetch, calls } = fakeFetch((req) => {
     if (req.method === "DELETE") return new Response(null, { status: 204 });

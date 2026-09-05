@@ -16,8 +16,8 @@ public sealed class WorkspaceServiceTests
 
     public WorkspaceServiceTests()
     {
-        _auditLogService = new AuditLogService(_auditLogRepo);
-        _service = new WorkspaceService(_auditLogService);
+        _auditLogService = new AuditLogService(_auditLogRepo, _accountRepo);
+        _service = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), _auditLogService);
     }
 
     private async Task<(Account account, Guid ownerId)> CreateAccountAsync()

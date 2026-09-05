@@ -44,6 +44,22 @@ public static class PersistenceServiceCollectionExtensions
         services.AddScoped<ISessionRepository, EfSessionRepository>();
         services.AddScoped<IApiKeyStore, EfApiKeyStore>();
         services.AddScoped<ILlmCredentialStore, EfLlmCredentialStore>();
+        services.AddScoped<ILlmUsageRepository, EfLlmUsageRepository>();
+
+        // #65 — the remaining platform aggregates, previously held in Application service fields.
+        services.AddScoped<IWorkspaceRepository, EfWorkspaceRepository>();
+        services.AddScoped<IConnectionRepository, EfConnectionRepository>();
+        services.AddScoped<IInstructionVersionRepository, EfInstructionVersionRepository>();
+        services.AddScoped<IProjectRepository, EfProjectRepository>();
+        services.AddScoped<IProjectDatabaseRepository, EfProjectDatabaseRepository>();
+        services.AddScoped<IWorkflowRepository, EfWorkflowRepository>();
+        services.AddScoped<ISkillRepository, EfSkillRepository>();
+        services.AddScoped<IAccountGroupRepository, EfAccountGroupRepository>();
+        services.AddScoped<IAllowedDomainRepository, EfAllowedDomainRepository>();
+        services.AddScoped<IWebhookRepository, EfWebhookRepository>();
+        services.AddScoped<ISchemaSnapshotRepository, EfSchemaSnapshotRepository>();
+        services.AddScoped<IProfileSnapshotRepository, EfProfileSnapshotRepository>();
+        services.AddScoped<IApiContractRepository, EfApiContractRepository>();
 
         return services;
     }

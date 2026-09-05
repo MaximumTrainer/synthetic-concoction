@@ -13,20 +13,29 @@ namespace Fabricate.Tests.Application;
 public sealed class WebhookServiceTests
 {
     private readonly InMemoryWebhookRepository _repo = new();
+    private readonly TestServices _services = new();
     private readonly WebhookService _service;
+    private readonly Guid _adminId = Guid.NewGuid();
+    private Guid _workspaceId;
 
     public WebhookServiceTests()
     {
-        _service = new WebhookService(_repo);
+        _service = new WebhookService(_repo, _services.WorkspaceService);
+        // Webhooks are workspace-scoped and carry a signing secret, so every call is authorised (#79).
+        _workspaceId = _services.WorkspaceService
+            .CreateAsync(new CreateWorkspaceCommand(Guid.NewGuid(), "WS", _adminId)).GetAwaiter().GetResult().Id;
     }
+
+    private async Task<Guid> CreateOtherWorkspaceAsync(Guid ownerId) =>
+        (await _services.WorkspaceService.CreateAsync(new CreateWorkspaceCommand(Guid.NewGuid(), "Other", ownerId))).Id;
 
     [Fact]
     public async Task RegisterAsync_WithValidUrl_ShouldPersistWebhook()
     {
-        var workspaceId = Guid.NewGuid();
+        var workspaceId = _workspaceId;
         var cmd = new RegisterWebhookCommand(workspaceId, "https://example.com/hook", ["run.completed"]);
 
-        var result = await _service.RegisterAsync(cmd, Guid.NewGuid());
+        var result = await _service.RegisterAsync(cmd, _adminId);
 
         result.Id.Should().NotBeEmpty();
         result.Url.Should().Be("https://example.com/hook");
@@ -38,9 +47,9 @@ public sealed class WebhookServiceTests
     [Fact]
     public async Task RegisterAsync_WithInvalidUrl_ShouldThrow()
     {
-        var cmd = new RegisterWebhookCommand(Guid.NewGuid(), "not-a-url", ["run.completed"]);
+        var cmd = new RegisterWebhookCommand(_workspaceId, "not-a-url", ["run.completed"]);
 
-        var act = async () => await _service.RegisterAsync(cmd, Guid.NewGuid());
+        var act = async () => await _service.RegisterAsync(cmd, _adminId);
 
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*Webhook URL*");
     }
@@ -48,9 +57,9 @@ public sealed class WebhookServiceTests
     [Fact]
     public async Task RegisterAsync_WithNoEvents_ShouldThrow()
     {
-        var cmd = new RegisterWebhookCommand(Guid.NewGuid(), "https://example.com/hook", []);
+        var cmd = new RegisterWebhookCommand(_workspaceId, "https://example.com/hook", []);
 
-        var act = async () => await _service.RegisterAsync(cmd, Guid.NewGuid());
+        var act = async () => await _service.RegisterAsync(cmd, _adminId);
 
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*event*");
     }
@@ -58,14 +67,14 @@ public sealed class WebhookServiceTests
     [Fact]
     public async Task ListAsync_ShouldReturnWebhooksForWorkspace()
     {
-        var workspaceId = Guid.NewGuid();
-        var otherWorkspaceId = Guid.NewGuid();
+        var workspaceId = _workspaceId;
+        var otherWorkspaceId = await CreateOtherWorkspaceAsync(_adminId);
 
-        await _service.RegisterAsync(new RegisterWebhookCommand(workspaceId, "https://a.com/h", ["run.completed"]), Guid.NewGuid());
-        await _service.RegisterAsync(new RegisterWebhookCommand(workspaceId, "https://b.com/h", ["run.failed"]), Guid.NewGuid());
-        await _service.RegisterAsync(new RegisterWebhookCommand(otherWorkspaceId, "https://c.com/h", ["run.completed"]), Guid.NewGuid());
+        await _service.RegisterAsync(new RegisterWebhookCommand(workspaceId, "https://a.com/h", ["run.completed"]), _adminId);
+        await _service.RegisterAsync(new RegisterWebhookCommand(workspaceId, "https://b.com/h", ["run.failed"]), _adminId);
+        await _service.RegisterAsync(new RegisterWebhookCommand(otherWorkspaceId, "https://c.com/h", ["run.completed"]), _adminId);
 
-        var result = await _service.ListAsync(workspaceId, Guid.NewGuid());
+        var result = await _service.ListAsync(workspaceId, _adminId);
 
         result.Should().HaveCount(2);
         result.Should().AllSatisfy(w => w.WorkspaceId.Should().Be(workspaceId));
@@ -74,22 +83,64 @@ public sealed class WebhookServiceTests
     [Fact]
     public async Task DeleteAsync_WithExistingWebhook_ShouldRemoveIt()
     {
-        var workspaceId = Guid.NewGuid();
+        var workspaceId = _workspaceId;
         var webhook = await _service.RegisterAsync(
             new RegisterWebhookCommand(workspaceId, "https://example.com/hook", ["run.completed"]),
-            Guid.NewGuid());
+            _adminId);
 
-        await _service.DeleteAsync(webhook.Id, Guid.NewGuid());
+        await _service.DeleteAsync(webhook.Id, _adminId);
 
-        var result = await _service.GetAsync(webhook.Id, Guid.NewGuid());
+        var result = await _service.GetAsync(webhook.Id, _adminId);
         result.Should().BeNull();
     }
 
     [Fact]
     public async Task DeleteAsync_WithNonExistentWebhook_ShouldThrow()
     {
-        var act = async () => await _service.DeleteAsync(Guid.NewGuid(), Guid.NewGuid());
+        var act = async () => await _service.DeleteAsync(Guid.NewGuid(), _adminId);
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not found*");
+    }
+
+    [Fact]
+    public async Task AUserWithNoWorkspaceAccess_CannotRegisterListReadOrDelete()
+    {
+        var outsider = Guid.NewGuid();
+        var webhook = await _service.RegisterAsync(
+            new RegisterWebhookCommand(_workspaceId, "https://example.com/hook", ["run.completed"], "s3cret"), _adminId);
+
+        var register = async () => await _service.RegisterAsync(
+            new RegisterWebhookCommand(_workspaceId, "https://evil.example.com/h", ["run.completed"]), outsider);
+        await register.Should().ThrowAsync<UnauthorizedAccessException>();
+
+        var list = async () => await _service.ListAsync(_workspaceId, outsider);
+        await list.Should().ThrowAsync<UnauthorizedAccessException>();
+
+        // The signing secret must not be readable by an outsider; not-found rather than forbidden.
+        (await _service.GetAsync(webhook.Id, outsider)).Should().BeNull();
+
+        var delete = async () => await _service.DeleteAsync(webhook.Id, outsider);
+        await delete.Should().ThrowAsync<InvalidOperationException>();
+        (await _service.GetAsync(webhook.Id, _adminId)).Should().NotBeNull("the outsider's delete must not have taken effect");
+    }
+
+    [Fact]
+    public async Task AViewerCanReadButNotRegisterOrDelete()
+    {
+        var viewer = Guid.NewGuid();
+        await _services.WorkspaceService.GrantAccessAsync(
+            new GrantWorkspaceAccessCommand(_workspaceId, viewer, false, WorkspaceRole.Viewer, _adminId));
+        var webhook = await _service.RegisterAsync(
+            new RegisterWebhookCommand(_workspaceId, "https://example.com/hook", ["run.completed"]), _adminId);
+
+        (await _service.ListAsync(_workspaceId, viewer)).Should().ContainSingle();
+        (await _service.GetAsync(webhook.Id, viewer)).Should().NotBeNull();
+
+        var register = async () => await _service.RegisterAsync(
+            new RegisterWebhookCommand(_workspaceId, "https://example.com/other", ["run.failed"]), viewer);
+        await register.Should().ThrowAsync<UnauthorizedAccessException>();
+
+        var delete = async () => await _service.DeleteAsync(webhook.Id, viewer);
+        await delete.Should().ThrowAsync<UnauthorizedAccessException>();
     }
 }
 

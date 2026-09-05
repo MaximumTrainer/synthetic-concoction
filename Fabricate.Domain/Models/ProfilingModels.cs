@@ -23,7 +23,8 @@ public sealed record ProfileSnapshot(
     string DatabaseName,
     int Version,
     DateTimeOffset CapturedAt,
-    IReadOnlyList<TableProfile> Tables);
+    IReadOnlyList<TableProfile> Tables,
+    Guid WorkspaceId = default);
 
 /// <summary>Versioned snapshot of a database's structural schema.</summary>
 public sealed record SchemaSnapshot(

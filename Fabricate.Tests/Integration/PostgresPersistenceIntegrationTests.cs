@@ -94,6 +94,88 @@ public sealed class PostgresPersistenceIntegrationTests : IAsyncLifetime
         (await credentials.ListByWorkspaceAsync(ws)).Should().ContainSingle();
     }
 
+    /// <summary>#65: the aggregates that used to live in service fields must survive a process restart.</summary>
+    [Fact]
+    public async Task PlatformAggregates_SurviveAcrossContexts()
+    {
+        if (_connectionString is null) return;
+
+        var dbName = await CreateEmptyDatabaseAsync();
+        var workspaceId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var workflowId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+
+        // First "process": write through the repositories.
+        await using (var db = NewContext(dbName))
+        {
+            await db.Database.MigrateAsync();
+
+            var workspaces = new EfWorkspaceRepository(db);
+            await workspaces.SaveAsync(new Workspace(workspaceId, Guid.NewGuid(), "Engineering", DateTimeOffset.UtcNow));
+            await workspaces.SaveMembershipAsync(new WorkspaceMembership(workspaceId, userId, false, WorkspaceRole.Admin, DateTimeOffset.UtcNow));
+
+            await new EfConnectionRepository(db).SaveAsync(
+                new Connection(Guid.NewGuid(), workspaceId, "warehouse", "postgres", "active", DateTimeOffset.UtcNow));
+
+            await new EfInstructionVersionRepository(db).SaveAsync(
+                new InstructionVersion(Guid.NewGuid(), workspaceId, 1, "Always answer in French.", userId, DateTimeOffset.UtcNow));
+            await new EfInstructionVersionRepository(db).SaveAsync(
+                new InstructionVersion(Guid.NewGuid(), Guid.Empty, 1, "Project rules.", userId, DateTimeOffset.UtcNow, projectId));
+
+            await new EfProjectRepository(db).SaveAsync(
+                new Project(projectId, workspaceId, "Customer data", ProjectStatus.Active, userId, DateTimeOffset.UtcNow));
+            await new EfProjectDatabaseRepository(db).SaveAsync(
+                new ProjectDatabase(Guid.NewGuid(), projectId, "primary", ProjectDatabaseType.External, "postgres", "active", null, DateTimeOffset.UtcNow));
+
+            var workflows = new EfWorkflowRepository(db);
+            await workflows.SaveAsync(new Workflow(workflowId, workspaceId, "Nightly", 1, WorkflowStatus.Active, DateTimeOffset.UtcNow));
+            var step = new WorkflowStep(Guid.NewGuid(), workflowId, 1, "generate", null);
+            await workflows.SaveStepAsync(step);
+            var run = new WorkflowRun(Guid.NewGuid(), workflowId, WorkflowRunStatus.Queued, DateTimeOffset.UtcNow);
+            await workflows.SaveRunAsync(run);
+            await workflows.SaveStepRunAsync(new WorkflowStepRun(Guid.NewGuid(), run.Id, step.Id, 1, WorkflowRunStatus.Queued, 0));
+
+            await new EfSkillRepository(db).SaveAsync(
+                new Skill(Guid.NewGuid(), workspaceId, "reporting", "Reporting skill", ["discover_schema"], true, DateTimeOffset.UtcNow));
+
+            var groupId = Guid.NewGuid();
+            var groups = new EfAccountGroupRepository(db);
+            await groups.SaveAsync(new AccountGroup(groupId, workspaceId, "Engineers", DateTimeOffset.UtcNow));
+            await groups.AddMemberAsync(new GroupMembership(groupId, userId, DateTimeOffset.UtcNow));
+
+            await new EfAllowedDomainRepository(db).SaveAsync(
+                new AllowedDomain(Guid.NewGuid(), workspaceId, "example.com", DateTimeOffset.UtcNow));
+
+            await new EfWebhookRepository(db).SaveAsync(
+                new WebhookRegistration(Guid.NewGuid(), workspaceId, "https://hooks.example.com/x", ["run.completed"], "s3cret", true, DateTimeOffset.UtcNow));
+        }
+
+        // Second "process": a fresh context over the same database reads everything back.
+        await using var reopened = NewContext(dbName);
+
+        (await new EfWorkspaceRepository(reopened).GetByIdAsync(workspaceId))!.Name.Should().Be("Engineering");
+        (await new EfWorkspaceRepository(reopened).ListMembershipsAsync(workspaceId)).Should().ContainSingle(m => m.PrincipalId == userId);
+        (await new EfConnectionRepository(reopened).ListByWorkspaceAsync(workspaceId)).Should().ContainSingle();
+        (await new EfInstructionVersionRepository(reopened).ListByWorkspaceAsync(workspaceId)).Should().ContainSingle();
+        (await new EfInstructionVersionRepository(reopened).ListByProjectAsync(projectId)).Should().ContainSingle();
+        (await new EfProjectRepository(reopened).ListByWorkspaceAsync(workspaceId)).Should().ContainSingle();
+        (await new EfProjectDatabaseRepository(reopened).ListByProjectAsync(projectId)).Should().ContainSingle();
+
+        var reopenedWorkflows = new EfWorkflowRepository(reopened);
+        (await reopenedWorkflows.ListByWorkspaceAsync(workspaceId)).Should().ContainSingle();
+        (await reopenedWorkflows.ListStepsAsync(workflowId)).Should().ContainSingle();
+
+        var skills = await new EfSkillRepository(reopened).ListByWorkspaceAsync(workspaceId);
+        skills.Should().ContainSingle().Which.AllowedTools.Should().Equal("discover_schema");
+
+        (await new EfAccountGroupRepository(reopened).ListGroupIdsForUserAsync(userId)).Should().ContainSingle();
+        (await new EfAllowedDomainRepository(reopened).ListByAccountAsync(workspaceId)).Should().ContainSingle();
+
+        var webhooks = await new EfWebhookRepository(reopened).ListByWorkspaceAsync(workspaceId);
+        webhooks.Should().ContainSingle().Which.Events.Should().Equal("run.completed");
+    }
+
     [Fact]
     public async Task ConcurrentMigrations_ApplySchemaExactlyOnce()
     {

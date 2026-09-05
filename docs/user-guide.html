@@ -36,6 +36,8 @@
     <li><a href="#platform">Multi-Tenant Platform</a></li>
     <li><a href="#chat">Agent Chat</a></li>
     <li><a href="#workflows">Workflows &amp; Skills</a></li>
+    <li><a href="#nosql-discovery-and-profiling">NoSQL</a></li>
+    <li><a href="#generated-apis">Generated APIs</a></li>
     <li><a href="#apikeys">API Keys</a></li>
     <li><a href="#selfref">Self-Referencing FK Backfill</a></li>
   </ol>
@@ -369,6 +371,32 @@ tables:
 <p>Top-level organisational unit. Members have roles: <code>Member</code> or <code>Owner</code>. Invitation flow: email + expiry token.</p>
 <h3>Workspaces</h3>
 <p>Scoped under Accounts. Contains connection catalog, secret references, agent instructions, and members with RBAC roles: Viewer / Editor / Admin.</p>
+<h3 id="connections">Connections</h3>
+<p>A workspace connection points at a database the agent may introspect. The connection string is sent <strong>once</strong>, at creation, encrypted with the same cipher as LLM credentials, and never returned.</p>
+<pre><code class="language-http">POST /workspaces/{workspaceId}/connections
+{
+  &quot;name&quot;: &quot;warehouse&quot;,
+  &quot;provider&quot;: &quot;postgres&quot;,
+  &quot;connectionString&quot;: &quot;Host=db.internal;Username=app;Password=…;Database=prod&quot;
+}</code></pre>
+<p>Supported providers: <code>sqlite</code>, <code>postgres</code> / <code>postgresql</code>. Anything else is a <code>400</code> naming the ones that work.</p>
+<table>
+  <tr><th>Route</th><th>Purpose</th></tr>
+  <tr><td><code>GET /workspaces/{id}/connections</code></td><td>Summaries: fingerprint, redacted target, status, last validation.</td></tr>
+  <tr><td><code>GET /workspaces/{id}/connections/{connectionId}</code></td><td>One summary. Another workspace's id is <code>404</code>, never <code>403</code>.</td></tr>
+  <tr><td><code>POST …/{connectionId}/rotate</code></td><td>Replaces the connection string. The old one is not recoverable.</td></tr>
+  <tr><td><code>POST …/{connectionId}/validate</code></td><td>Opens the connection and reads metadata; reports reachability.</td></tr>
+  <tr><td><code>DELETE …/{connectionId}</code></td><td>Removes it.</td></tr>
+</table>
+<p>Every read returns a <strong>summary</strong>, never the connection string. The <code>redacted</code> form keeps the host and database so you can recognise which connection you are looking at, and drops every credential. The <code>fingerprint</code> is a short hash — enough to tell two connections apart and to see that a rotation happened, without being reversible.</p>
+<p>Validation opens the connection and reads metadata rather than pinging, because a ping can succeed where the credentials cannot actually read. A failure message is scrubbed before it is returned or logged: database drivers quote the connection string back in their errors more often than not.</p>
+<h4 id="which-database-a-chat-session-sees">Which database a chat session sees</h4>
+<ol>
+<li>The session's <strong>project database</strong>, when the project has an external database naming a workspace connection.</li>
+<li>The workspace's <strong>single active connection</strong>, when it has exactly one.</li>
+<li>Otherwise the <strong>instance-level</strong> <code>SchemaProvider</code> configuration — which is what keeps the CLI and single-tenant self-hosting working exactly as before.</li>
+</ol>
+<p>With several connections and no project binding, discovery falls back to the configured default rather than guessing which of your databases to introspect.</p>
 <h3>Projects</h3>
 <p>Scoped under Workspaces. Holds database catalog entries and run history. Supports soft-delete (archive).</p>
 <h3>Governance</h3>
@@ -378,6 +406,45 @@ tables:
   <tr><td>Allowed Domains</td><td>Email domain allowlist for invitations.</td></tr>
   <tr><td>Audit Log</td><td>Append-only log of significant events.</td></tr>
 </table>
+<h3 id="reading-the-audit-log">Reading the audit log</h3>
+<pre><code class="language-http">GET /accounts/{accountId}/audit?page=1&amp;pageSize=50&amp;action=workspace</code></pre>
+<p>Open to any member of the account. Events come back newest first.</p>
+<table>
+  <tr><th>Filter</th><th>Matches</th></tr>
+  <tr><td><code>action</code></td><td>Anywhere in the action name — <code>action=workspace</code> finds <code>workspace.created</code> and <code>workspace.access_granted</code>.</td></tr>
+  <tr><td><code>actionPrefix</code></td><td>The start of the action name, which selects a whole family: <code>actionPrefix=chat.</code> or <code>actionPrefix=api.</code>.</td></tr>
+  <tr><td><code>apiKeyId</code></td><td>Everything one API key did.</td></tr>
+</table>
+<h3 id="what-is-recorded">What is recorded</h3>
+<table>
+  <tr><th>Action</th><th>When</th></tr>
+  <tr><td><code>api.request</code></td><td>Every authenticated request: which key called which <strong>route template</strong>, with method, status, scopes and duration. Anonymous endpoints (<code>/healthz</code>, Swagger) are not recorded.</td></tr>
+  <tr><td><code>chat.tool_invoked</code></td><td>A tool call ran and succeeded.</td></tr>
+  <tr><td><code>chat.tool_failed</code></td><td>A tool call ran and threw.</td></tr>
+  <tr><td><code>chat.tool_blocked</code></td><td>A tool call was refused because the tool is not in the workspace allowlist.</td></tr>
+  <tr><td><code>chat.tool_requested</code></td><td>A tool call was parked for review (<code>ReviewRequired</code> sessions).</td></tr>
+  <tr><td><code>chat.tool_approved</code></td><td>A parked call was approved; the run that follows is audited separately.</td></tr>
+  <tr><td><code>chat.plan_stated</code></td><td>The agent stated the steps it intends to take, before its first generating call.</td></tr>
+  <tr><td><code>chat.plan_revised</code></td><td>The agent revised a plan it had already stated.</td></tr>
+</table>
+<p>Two things are recorded deliberately narrowly:</p>
+<ul>
+<li><strong>Route templates, not paths.</strong> A path carries workspace, project and session identifiers; <code>/workspaces/{workspaceId}/projects/{projectId}</code> says which endpoint was called without copying tenant identifiers into a log that is exported and kept for months. Headers, query values and bodies are never recorded.</li>
+<li><strong>Tool names, not payloads.</strong> Tool arguments carry whatever the user or the model put in the prompt, and outputs carry query results. Copying either into the account audit log would make it a second, longer-lived copy of the conversation. The invocation id is recorded instead, so the payload stays reachable to anyone with the authority to read it.</li>
+</ul>
+<p><code>api.request</code> is on by default and can be sampled or switched off with <code>FABRICATE_API_USAGE_SAMPLING</code>; see <a href="how-to/self-hosting.html#audit-retention">the self-hosting guide</a>.</p>
+<h3 id="exporting-the-audit-log">Exporting the audit log</h3>
+<pre><code class="language-http">GET /accounts/{accountId}/audit/export?from=2026-01-01T00:00:00Z&amp;to=2026-09-01T00:00:00Z&amp;format=json</code></pre>
+<p><strong>Account owners only</strong> — members who can read the log through the query API cannot export it. The response is a download (<code>Content-Disposition: attachment</code>), streamed rather than buffered, so exporting a large account does not depend on it fitting in memory.</p>
+<table>
+  <tr><th>Parameter</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>from</code></td><td>none</td><td>Only events at or after this instant.</td></tr>
+  <tr><td><code>to</code></td><td>none</td><td>Only events at or before this instant.</td></tr>
+  <tr><td><code>format</code></td><td><code>json</code></td><td><code>json</code> for an array of events, <code>csv</code> for a header row plus one line per event. Anything else is a <code>400</code>.</td></tr>
+</table>
+<p>The export contains the same events the query API returns, oldest first. One difference: every event's <code>details</code> field is <strong>redacted on the way out</strong>. The log is written by many call sites, so an export — a file that leaves the building — does not assume all of them got redaction right. Values are replaced with <code>[redacted]</code> wherever the key names something sensitive (<code>secret</code>, <code>password</code>, <code>token</code>, <code>apiKey</code>, <code>credential</code>, <code>fingerprint</code>, connection strings), and known provider key shapes are stripped even when they appear without a key name. Credential fingerprints are included deliberately: a fingerprint identifies a live key, and correlating one across accounts says which tenants share it. Non-sensitive detail — provider names, model names, target ids — survives, or the export would not be worth having.</p>
+<p>Redaction applies to the export only. The stored event is left as written, because rewriting history in place to hide a mistake is worse than the mistake.</p>
+<p>Operators can cap how long events are kept; see <a href="how-to/self-hosting.html#audit-retention">Audit retention</a>. Retention is off by default.</p>
 
 <h2 id="chat">11. Agent Chat</h2>
 <p>Chat sessions let you interact with Fabricate via natural language. Sessions are created per workspace. Each turn is answered by the model the workspace is configured to use — a credential the workspace registered itself (<a href="how-to/byok-llm-credentials.html">bring your own key</a>) or, where allowed, the operator's platform credential (<a href="how-to/self-hosting.html">self-hosting</a>). Fabricate ships with no model credential of its own.</p>
@@ -397,6 +464,18 @@ tables:
   <tr><td><code>Autonomous</code></td><td>Run without confirmation.</td></tr>
   <tr><td><code>ReviewRequired</code></td><td>Parked as <code>Pending</code>; an Editor or Admin approves each one. Use wherever <code>generate_data</code> has real side effects.</td></tr>
 </table>
+<h3 id="asking-rather-than-guessing">Asking rather than guessing</h3>
+<p>The agent is told, per mode, when to ask instead of assuming. A request like <em>"generate some test data"</em> against a ten-table schema leaves the tables, the row counts and the compliance profile unstated, and guessing is the wrong default for a tool that writes data.</p>
+<table>
+  <tr><th>Mode</th><th>Behaviour when something is unspecified</th></tr>
+  <tr><td><code>Guided</code></td><td>Asks one specific question covering everything it needs, and makes no generating call until answered. A request that is already specific proceeds without asking.</td></tr>
+  <tr><td><code>Autonomous</code></td><td>Chooses a sensible default and proceeds, <strong>stating every assumption</strong> in the reply so it can be corrected.</td></tr>
+  <tr><td><code>ReviewRequired</code></td><td>Asks rather than parking a call the reviewer cannot judge, since a reviewer sees the call and not the reasoning.</td></tr>
+</table>
+<p>The cases that trigger a question are: unspecified tables or row counts on a multi-table schema, an unspecified connection when the workspace has several, a compliance profile that would change what is produced, and anything that would overwrite existing data.</p>
+<h3 id="plans">Plans</h3>
+<p>For a request needing more than one tool call, the agent calls <code>state_plan</code> with the steps it intends to take before the first call that generates or changes data, and calls it again with revised steps if it changes course.</p>
+<p>A plan is a tool call rather than prose so it lands where every other call does: a tool invocation carrying the steps, a message in the conversation, and an audit event — <code>chat.plan_stated</code> or <code>chat.plan_revised</code>. A revision therefore sits next to the calls it governs, in order, instead of being buried in an assistant message. As with every tool, the steps stay on the invocation and out of the audit log.</p>
 <h3>Built-in Tools</h3>
 <table>
   <tr><th>Tool</th><th>Description</th></tr>
@@ -404,12 +483,91 @@ tables:
   <tr><td><code>generate_data</code></td><td>Runs the full generation pipeline, returns JSON result with row and table counts.</td></tr>
 </table>
 <p>Each workspace can be restricted to a subset of tools; the allowlist is enforced server-side. <code>/tool &lt;name&gt; &lt;json&gt;</code> invokes a tool directly, bypassing the model.</p>
-<p>Workspace-level <strong>agent instructions</strong> are prepended to every session in that workspace as a system prompt; project instructions and a per-session override layer on top. Schema metadata and tool outputs are sent to the model; row values from your databases are not.</p>
+<p>Workspace-level <strong>agent instructions</strong> are prepended to every session in that workspace as a system prompt; project instructions and a per-session override layer on top.</p>
+<h3 id="what-is-sent-to-the-model">What is sent to the model</h3>
+<p>Schema metadata — table, column and type names, relationships — and tool outputs. <strong>Row values are not sent</strong>, and that is enforced rather than assumed: every tool declares what class of content its result carries, and a tool whose class the boundary forbids is not offered to the model at all.</p>
+<table>
+  <tr><th>Content class</th><th>May be sent</th></tr>
+  <tr><td><code>Metadata</code> — names, shapes, run summaries</td><td>Always</td></tr>
+  <tr><td><code>AggregateStatistics</code> — histograms, distinct counts, min/max over real rows</td><td>Only with the workspace opt-in</td></tr>
+  <tr><td><code>SampledValues</code> — values copied from real rows</td><td>Only with the workspace opt-in</td></tr>
+</table>
+<p>The opt-in is <code>allowSampledDataInPrompts</code> on the workspace LLM policy and defaults to false. It <strong>cannot be enabled on a <code>Healthcare</code> or <code>Finance</code> workspace</strong>: the request is refused with <code>409</code> and the policy is left unchanged. Every refusal is audited as <code>llm.boundary_blocked</code> with the tool name and content class, never the payload. See <a href="how-to/self-hosting.html#the-prompt-data-boundary">the self-hosting guide</a>.</p>
 
+<h2 id="llm-usage-and-token-budgets">LLM usage and token budgets</h2>
+<p>Every provider call is attributed to the workspace, project and session that caused it, and rolled up on demand.</p>
+<pre><code class="language-http">GET /workspaces/{workspaceId}/llm-usage?from=2026-09-01T00:00:00Z&amp;to=2026-10-01T00:00:00Z&amp;groupBy=model
+GET /accounts/{accountId}/llm-usage?groupBy=credential</code></pre>
+<p>The workspace view is open to any workspace member — it is their own consumption, and hiding it from the people doing the work is how a budget becomes a surprise. The account rollup spans workspaces the caller may not individually belong to, so it is <strong>account owners only</strong>. Both default to the last 30 days.</p>
+<table>
+  <tr><th><code>groupBy</code></th><th>Buckets by</th></tr>
+  <tr><td><code>model</code> (default)</td><td>Model name.</td></tr>
+  <tr><td><code>credential</code></td><td>Credential id. Calls made on the operator's platform credential bucket under <code>platform</code>, so they are not misattributed to a tenant's key.</td></tr>
+  <tr><td><code>day</code></td><td>UTC date, <code>YYYY-MM-DD</code>.</td></tr>
+</table>
+<p>Each bucket carries <code>inputTokens</code>, <code>outputTokens</code>, <code>totalTokens</code>, <code>calls</code> and <code>failedCalls</code>. <strong>Cost is not returned</strong> — prices change and differ by platform, so tokens are the unit.</p>
+<p>One record is written per provider <em>attempt</em>, not per turn. A call that fails and is retried writes a row for each try, flagged <code>RetriedFailure</code>, so a workspace whose calls keep failing is visible rather than silently slow.</p>
+<h3 id="budgets">Budgets</h3>
+<p><code>dailyTokenBudget</code> and <code>monthlyTokenBudget</code> on the workspace LLM policy cap consumption:</p>
+<pre><code class="language-http">PUT /workspaces/{workspaceId}/llm-credentials/policy
+{
+  "allowPlatformFallback": true,
+  "dailyTokenBudget": 200000,
+  "monthlyTokenBudget": 4000000
+}</code></pre>
+<p>Omit a field to leave it unchanged; send <code>-1</code> to clear the cap. Workspace admins only.</p>
+<p>Once a budget is reached the chat turn returns a <code>System</code> notice saying which budget was hit and when it resets, <strong>and no provider call is made</strong> — a budget that only reports after the fact is not a budget. The daily budget resets at 00:00 UTC and the monthly one at 00:00 UTC on the first of the month. When both are exceeded the daily one is reported, because it is the more actionable message.</p>
 <h2 id="workflows">12. Workflows &amp; Skills</h2>
 <p>Workflows define multi-step automation sequences triggered on demand via <code>POST /workflows/{id}/run</code>.</p>
 <p>The custom skill registry supports OpenAPI contract ingestion — import an external API spec to expose its operations as callable workflow steps.</p>
 
+<h2 id="nosql-discovery-and-profiling">NoSQL discovery and profiling</h2>
+<p>Fabricate discovers and profiles document stores as well as relational databases: <strong>Cosmos DB, MongoDB, DynamoDB and Firestore</strong>.</p>
+<pre><code class="language-bash">fabricate discover --provider mongodb --connection &quot;mongodb://host:27017&quot; --database clinic
+fabricate discover-profile --provider mongodb --connection &quot;mongodb://host:27017&quot; --database clinic</code></pre>
+<p><code>discover</code> prints collection metadata — fields with inferred types, partition key, indexes. <code>discover-profile</code> prints a <code>NoSqlProfileSnapshot</code>: document count per collection, and per field its inferred type, non-null and null counts, a distinct-value estimate, and a minimum and maximum.</p>
+<h3 id="connection-strings">Connection strings</h3>
+<p>Both commands take the same <code>--connection</code> for a given provider, and each provider's adapters read it the same way:</p>
+<table>
+<thead><tr><th>Provider</th><th><code>--connection</code></th><th><code>--database</code></th></tr></thead>
+<tbody>
+<tr><td><code>mongodb</code></td><td>A MongoDB connection string</td><td>Database name</td></tr>
+<tr><td><code>cosmosdb</code></td><td><code>AccountEndpoint=…;AccountKey=…</code></td><td>Database name</td></tr>
+<tr><td><code>dynamodb</code></td><td><code>region=us-east-1</code>, optionally <code>;serviceUrl=http://localhost:8000</code></td><td>A table-name prefix, or empty for all</td></tr>
+<tr><td><code>firestore</code></td><td>The GCP project id</td><td>Named database, or empty for <code>(default)</code></td></tr>
+</tbody>
+</table>
+<p>Credentials are ambient wherever the provider offers it — an IAM role for DynamoDB, Application Default Credentials for Firestore — so no key need be stored. Two extra Cosmos keys exist for constrained networks and for the emulator: <code>ConnectionMode=Gateway</code> talks HTTPS to one endpoint instead of opening a range of TCP ports, and <code>DisableServerCertificateValidation=True</code> is accepted <strong>only</strong> for a loopback endpoint, so it cannot weaken a connection to a real account. DynamoDB Local and the Firestore emulator (<code>FIRESTORE_EMULATOR_HOST</code>) both work against the same adapters, unchanged.</p>
+<h3 id="what-the-metadata-model-does-not-have">What the metadata model does not have</h3>
+<p><strong>No foreign-key graph.</strong> Document stores do not declare relationships, so nothing can be inferred that the database itself does not know. The relational generator's referential integrity — parent rows before children, foreign keys pointing at real rows — has no equivalent here, and collection metadata carries no <code>ForeignKeySchema</code>. Relationships between collections are a matter of application convention, and Fabricate does not guess at them.</p>
+<ul>
+<li><strong>Fields come from a sample</strong> of up to 200 documents per collection. A field appearing only in older or rarer documents may not be seen at all, and a field with more than one type across documents is reported as <code>Unknown</code> rather than the first type seen.</li>
+<li><strong>Counts are the provider's own.</strong> MongoDB's estimated count and DynamoDB's <code>ItemCount</code> are both approximate by the service's definition — DynamoDB's updates roughly every six hours. Cosmos DB and Firestore counts are exact server-side aggregates.</li>
+</ul>
+<h3 id="profiles-never-contain-document-content">Profiles never contain document content</h3>
+<p>A profile is aggregates. Two consequences that are easy to miss:</p>
+<ul>
+<li><strong>String fields report length, not value.</strong> A string minimum and maximum are verbatim customer values, and on a field with few distinct values they <em>are</em> the field's content — a free-text note column with one entry would otherwise report that entry as both its minimum and its maximum. The length range carries the shape without the content. Numbers, dates and identifiers report real minima and maxima, where the value is a measure rather than a piece of text.</li>
+<li><strong>Arrays and binary fields report length only</strong>, and Mongo's <code>_id</code> is skipped, for the same reason.</li>
+</ul>
+<p>Distinct values are counted exactly up to 1000 and reported as 1000 beyond that: an exact count on a high-cardinality field would mean holding every value, which is the data itself.</p>
+<h2 id="generated-apis">Generated APIs</h2>
+<p>Ingest an OpenAPI contract, bind its operations to a generated dataset, and serve them — a mock API whose payloads come from your own generated data and match the contract you gave it.</p>
+<h3 id="post-api-contracts">POST /workspaces/{workspaceId}/api-contracts</h3>
+<p>Requires the workspace <strong>Editor</strong> role. Stores the contract and one endpoint per operation. A document that will not parse is a <code>400</code> carrying the parser's own reasons.</p>
+<h3 id="get-api-endpoints">GET /workspaces/{workspaceId}/api-contracts and /api-endpoints</h3>
+<p>Each endpoint carries its <code>path</code>, <code>method</code>, <code>operationId</code>, the <code>responseKind</code> derived from the contract (<code>Collection</code> for an array response, <code>Item</code> for a single object on a path ending in a parameter), its binding, and <code>isServable</code>.</p>
+<h3 id="patch-api-endpoint">PATCH /workspaces/{workspaceId}/api-endpoints/{endpointId}</h3>
+<pre><code class="language-json">{ &quot;artifactRunId&quot;: &quot;3fa85f64-...&quot;, &quot;boundTable&quot;: &quot;main.customers&quot; }</code></pre>
+<p>Binds the endpoint to a table in a completed run, exported with the <code>json</code> format. Send <code>isActive</code> to toggle it, or <code>clearBinding: true</code> to unbind.</p>
+<p>The bound rows are checked against the contract's response schema <strong>at bind time</strong>, and any mismatch is stored on the endpoint as <code>diagnostics</code> — finding out when a client rejects the payload is the worst moment to learn it. An endpoint with a diagnostic is stored but not served, so a bad binding is visible rather than fatal.</p>
+<p>The check is deliberately narrow: required properties present, and declared primitive types not contradicted. That catches the mistake it exists for — binding to the wrong table — without a full JSON Schema implementation whose failures would be harder to act on than the mismatch.</p>
+<h3 id="get-mock">GET /workspaces/{workspaceId}/mock/{path}</h3>
+<pre><code class="language-http">GET /workspaces/{workspaceId}/mock/customers
+GET /workspaces/{workspaceId}/mock/customers/42</code></pre>
+<p>Matches the path against the contract's templates, preferring literal segments over parameters, and returns the bound rows: an array for a <code>Collection</code> operation, one row for an <code>Item</code> operation matched on the trailing path parameter. The <code>X-Fabricate-Operation</code> response header names the operation that answered.</p>
+<p>Everything that is not a live, bound, servable endpoint is a <code>404</code>: an unbound endpoint, an inactive one, an endpoint with diagnostics, a path outside the contract, a method the contract does not declare for that path, and an item id with no matching row.</p>
+<p>Mock routes use the same API-key authentication and rate limiting as the rest of the API, and each call is audited like any other request — a mock endpoint is still this instance serving a tenant's data.</p>
 <h2 id="apikeys">13. API Keys</h2>
 <p>All API keys use the <code>cnc_</code> prefix. The plaintext secret is shown once at creation. The platform stores only the SHA-256 hash.</p>
 <table>

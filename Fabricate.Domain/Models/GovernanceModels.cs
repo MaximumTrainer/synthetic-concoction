@@ -17,7 +17,13 @@ public sealed record AllowedDomain(
     string Domain,
     DateTimeOffset CreatedAt);
 
-/// <summary>Immutable audit log entry. Must never be updated or deleted.</summary>
+/// <summary>
+/// Immutable audit log entry. Never updated; deleted only by the retention sweep (#74).
+/// </summary>
+/// <param name="ApiKeyId">
+/// The API key the request authenticated with, where one did (#72). Its own column rather than a detail string
+/// so "everything this key did" is an indexed query rather than a scan.
+/// </param>
 public sealed record AuditEvent(
     Guid Id,
     Guid AccountId,
@@ -27,4 +33,5 @@ public sealed record AuditEvent(
     string? TargetId,
     string CorrelationId,
     DateTimeOffset OccurredAt,
-    string? Details = null);
+    string? Details = null,
+    Guid? ApiKeyId = null);

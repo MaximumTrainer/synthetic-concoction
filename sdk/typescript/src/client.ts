@@ -3,24 +3,37 @@ import type {
   AccountMembership,
   ApiKey,
   ApiKeyCreateResult,
+  ApiContract,
+  BindEndpointRequest,
+  GeneratedApiEndpoint,
   ChatMessage,
   ChatMode,
   ChatSession,
   ChatStreamEvent,
   ChatTurnResult,
+  ComplianceProfileName,
   FabricateClientOptions,
   DatasetRun,
+  InstructionVersion,
   LlmCredentialSummary,
+  LlmUsageGrouping,
+  LlmUsageSummary,
   LlmCredentialValidationResult,
-  PaginatedResult,
   Project,
+  ProjectDatabase,
+  ProjectDatabaseType,
   RegisterLlmCredentialRequest,
+  RunArtifact,
+  StartRunRequest,
   SetWorkspaceLlmPolicyRequest,
   ToolApprovalResult,
   ToolInvocation,
   Workspace,
   WorkspaceLlmPolicy,
   Workflow,
+  WorkflowRun,
+  WorkflowStepInput,
+  WorkflowStepRun,
 } from "./types.js";
 
 export class FabricateError extends Error {
@@ -72,11 +85,16 @@ export class FabricateClient {
 
   // ─── Workspaces ──────────────────────────────────────────────────────────────
 
+  /**
+   * Creates a workspace. `complianceProfile` is fixed at creation: a `Healthcare` or `Finance` workspace can
+   * never opt in to sending sampled data to a model provider.
+   */
   async createWorkspace(
     accountId: string,
-    name: string
+    name: string,
+    complianceProfile: ComplianceProfileName = "Default"
   ): Promise<Workspace> {
-    return this.post<Workspace>("/workspaces", { accountId, name });
+    return this.post<Workspace>("/workspaces", { accountId, name, complianceProfile });
   }
 
   async getWorkspace(workspaceId: string): Promise<Workspace> {
@@ -85,42 +103,106 @@ export class FabricateClient {
 
   // ─── Projects ────────────────────────────────────────────────────────────────
 
-  async createProject(
-    workspaceId: string,
-    name: string
-  ): Promise<Project> {
-    return this.post<Project>("/projects", { workspaceId, name });
+  async createProject(workspaceId: string, name: string): Promise<Project> {
+    return this.post<Project>(`/workspaces/${workspaceId}/projects`, { name });
   }
 
   async listProjects(workspaceId: string): Promise<Project[]> {
-    return this.get<Project[]>(`/projects?workspaceId=${workspaceId}`);
+    return this.get<Project[]>(`/workspaces/${workspaceId}/projects`);
   }
 
-  async getProject(projectId: string): Promise<Project> {
-    return this.get<Project>(`/projects/${projectId}`);
+  async getProject(workspaceId: string, projectId: string): Promise<Project> {
+    return this.get<Project>(`/workspaces/${workspaceId}/projects/${projectId}`);
   }
 
-  async archiveProject(projectId: string): Promise<void> {
-    await this.post(`/projects/${projectId}/archive`, {});
+  async renameProject(workspaceId: string, projectId: string, name: string): Promise<Project> {
+    return this.patch<Project>(`/workspaces/${workspaceId}/projects/${projectId}/name`, { name });
+  }
+
+  /** Returns the archived project. */
+  async archiveProject(workspaceId: string, projectId: string): Promise<Project> {
+    return this.post<Project>(`/workspaces/${workspaceId}/projects/${projectId}/archive`, {});
+  }
+
+  async listProjectDatabases(workspaceId: string, projectId: string): Promise<ProjectDatabase[]> {
+    return this.get<ProjectDatabase[]>(`/workspaces/${workspaceId}/projects/${projectId}/databases`);
+  }
+
+  async addProjectDatabase(
+    workspaceId: string,
+    projectId: string,
+    database: {
+      name: string;
+      type: ProjectDatabaseType;
+      provider: string;
+      connectionRefId?: string | null;
+    }
+  ): Promise<ProjectDatabase> {
+    return this.post<ProjectDatabase>(`/workspaces/${workspaceId}/projects/${projectId}/databases`, {
+      name: database.name,
+      type: database.type,
+      provider: database.provider,
+      connectionRefId: database.connectionRefId ?? null,
+    });
+  }
+
+  async saveProjectInstruction(
+    workspaceId: string,
+    projectId: string,
+    content: string
+  ): Promise<InstructionVersion> {
+    return this.post<InstructionVersion>(
+      `/workspaces/${workspaceId}/projects/${projectId}/instructions`,
+      { content }
+    );
+  }
+
+  async getProjectInstruction(workspaceId: string, projectId: string): Promise<InstructionVersion> {
+    return this.get<InstructionVersion>(`/workspaces/${workspaceId}/projects/${projectId}/instructions`);
   }
 
   // ─── Runs ────────────────────────────────────────────────────────────────────
 
-  async listRuns(
-    page = 1,
-    pageSize = 20
-  ): Promise<PaginatedResult<DatasetRun>> {
-    return this.get<PaginatedResult<DatasetRun>>(
-      `/runs?page=${page}&pageSize=${pageSize}`
+  /**
+   * Starts a generation run and returns it once complete, with its checksums and artifact paths. Requires the
+   * workspace Editor role.
+   */
+  async startRun(workspaceId: string, request: StartRunRequest): Promise<DatasetRun> {
+    return this.post<DatasetRun>(`/workspaces/${workspaceId}/runs`, request);
+  }
+
+  /** One page of the workspace's runs. The API returns a bare array, not a pagination envelope. */
+  async listRuns(workspaceId: string, page = 1, pageSize = 20): Promise<DatasetRun[]> {
+    return this.get<DatasetRun[]>(`/workspaces/${workspaceId}/runs?page=${page}&pageSize=${pageSize}`);
+  }
+
+  async getRun(workspaceId: string, runId: string): Promise<DatasetRun> {
+    return this.get<DatasetRun>(`/workspaces/${workspaceId}/runs/${runId}`);
+  }
+
+  /** Returns the cancelled run. Throws `FabricateError` with status 409 if it is already in a terminal state. */
+  async cancelRun(workspaceId: string, runId: string): Promise<DatasetRun> {
+    return this.post<DatasetRun>(`/workspaces/${workspaceId}/runs/${runId}/cancel`, {});
+  }
+
+  /** The run's artifact manifest: name, size, SHA-256 and content type. */
+  async listArtifacts(workspaceId: string, runId: string): Promise<RunArtifact[]> {
+    return this.get<RunArtifact[]>(`/workspaces/${workspaceId}/runs/${runId}/artifacts`);
+  }
+
+  /**
+   * Downloads one artifact as raw bytes. `name` may carry the exporter directory — `csv/main_users.csv` — so
+   * each segment is encoded separately and the slashes survive as path separators.
+   */
+  async downloadArtifact(workspaceId: string, runId: string, name: string): Promise<ArrayBuffer> {
+    const encoded = name.split("/").map(encodeURIComponent).join("/");
+    const res = await this.fetchFn(
+      `${this.baseUrl}/workspaces/${workspaceId}/runs/${runId}/artifacts/${encoded}`,
+      { method: "GET", headers: this.headers() }
     );
-  }
 
-  async getRun(runId: string): Promise<DatasetRun> {
-    return this.get<DatasetRun>(`/runs/${runId}`);
-  }
-
-  async cancelRun(runId: string): Promise<void> {
-    await this.post(`/runs/${runId}/cancel`, {});
+    if (!res.ok) await this.handleResponse<unknown>(res);
+    return res.arrayBuffer();
   }
 
   /**
@@ -128,13 +210,14 @@ export class FabricateClient {
    * Throws FabricateError if the run fails or is cancelled.
    */
   async pollRun(
+    workspaceId: string,
     runId: string,
     intervalMs = 2000,
     timeoutMs = 300_000
   ): Promise<DatasetRun> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const run = await this.getRun(runId);
+      const run = await this.getRun(workspaceId, runId);
       if (run.status === "Completed") return run;
       if (run.status === "Failed") throw new FabricateError(`Run ${runId} failed`, 0);
       if (run.status === "Cancelled") throw new FabricateError(`Run ${runId} was cancelled`, 0);
@@ -149,13 +232,37 @@ export class FabricateClient {
   async createWorkflow(
     workspaceId: string,
     name: string,
-    steps: unknown[]
+    steps: WorkflowStepInput[]
   ): Promise<Workflow> {
-    return this.post<Workflow>("/workflows", { workspaceId, name, steps });
+    return this.post<Workflow>(`/workspaces/${workspaceId}/workflows`, { name, steps });
   }
 
-  async runWorkflow(workflowId: string): Promise<{ runId: string }> {
-    return this.post<{ runId: string }>(`/workflows/${workflowId}/runs`, {});
+  async runWorkflow(workspaceId: string, workflowId: string): Promise<WorkflowRun> {
+    return this.post<WorkflowRun>(`/workspaces/${workspaceId}/workflows/${workflowId}/runs`, {});
+  }
+
+  async getWorkflowRun(
+    workspaceId: string,
+    workflowId: string,
+    runId: string
+  ): Promise<WorkflowRun> {
+    return this.get<WorkflowRun>(
+      `/workspaces/${workspaceId}/workflows/${workflowId}/runs/${runId}`
+    );
+  }
+
+  async getWorkflowStepRuns(
+    workspaceId: string,
+    workflowId: string,
+    runId: string
+  ): Promise<WorkflowStepRun[]> {
+    return this.get<WorkflowStepRun[]>(
+      `/workspaces/${workspaceId}/workflows/${workflowId}/runs/${runId}/steps`
+    );
+  }
+
+  async disableWorkflow(workspaceId: string, workflowId: string): Promise<Workflow> {
+    return this.post<Workflow>(`/workspaces/${workspaceId}/workflows/${workflowId}/disable`, {});
   }
 
   // ─── Chat ────────────────────────────────────────────────────────────────────
@@ -322,28 +429,92 @@ export class FabricateClient {
     );
   }
 
+  // ─── Generated APIs from OpenAPI contracts ────────────────────────────────────
+
+  /** Ingests an OpenAPI document and stores the endpoints it declares. Requires the Editor role. */
+  async ingestApiContract(workspaceId: string, name: string, document: string): Promise<ApiContract> {
+    return this.post<ApiContract>(`/workspaces/${workspaceId}/api-contracts`, { name, document });
+  }
+
+  async listApiContracts(workspaceId: string): Promise<ApiContract[]> {
+    return this.get<ApiContract[]>(`/workspaces/${workspaceId}/api-contracts`);
+  }
+
+  async listApiEndpoints(workspaceId: string): Promise<GeneratedApiEndpoint[]> {
+    return this.get<GeneratedApiEndpoint[]>(`/workspaces/${workspaceId}/api-endpoints`);
+  }
+
+  /**
+   * Binds an endpoint to a run's table, or toggles it. The response carries `diagnostics` when the bound table
+   * does not satisfy the contract — the endpoint is stored either way, and is not served while a diagnostic
+   * stands.
+   */
+  async bindApiEndpoint(
+    workspaceId: string,
+    endpointId: string,
+    request: BindEndpointRequest
+  ): Promise<GeneratedApiEndpoint> {
+    return this.patch<GeneratedApiEndpoint>(`/workspaces/${workspaceId}/api-endpoints/${endpointId}`, request);
+  }
+
+  /**
+   * Calls a generated endpoint. `path` is the contract path — `/customers/42` — and the response is whatever the
+   * contract declares. Unbound, inactive and unknown paths are all a 404.
+   */
+  async callGeneratedApi<T = unknown>(workspaceId: string, path: string, method = "GET"): Promise<T> {
+    const trimmed = path.replace(/^\//, "");
+    return this.send<T>(method, `/workspaces/${workspaceId}/mock/${trimmed}`, undefined);
+  }
+
+  // ─── LLM usage ────────────────────────────────────────────────────────────────
+
+  /**
+   * Token usage for one workspace. Open to any workspace member — it is their own consumption, and hiding it
+   * from the people doing the work is how a budget becomes a surprise. Defaults to the last 30 days.
+   *
+   * Cost is deliberately not returned: prices change and differ by platform, so tokens are the unit.
+   */
+  async getWorkspaceLlmUsage(
+    workspaceId: string,
+    options: { from?: string; to?: string; groupBy?: LlmUsageGrouping } = {}
+  ): Promise<LlmUsageSummary> {
+    return this.get<LlmUsageSummary>(`/workspaces/${workspaceId}/llm-usage` + usageQuery(options));
+  }
+
+  /** The same rollup across every workspace in an account. Account owners only. */
+  async getAccountLlmUsage(
+    accountId: string,
+    options: { from?: string; to?: string; groupBy?: LlmUsageGrouping } = {}
+  ): Promise<LlmUsageSummary> {
+    return this.get<LlmUsageSummary>(`/accounts/${accountId}/llm-usage` + usageQuery(options));
+  }
+
   // ─── API Keys ─────────────────────────────────────────────────────────────────
 
+  /**
+   * Creates an API key. `expiry` is a lifetime, not an instant: the API binds a .NET TimeSpan, so it is sent
+   * as `d.hh:mm:ss`. Omit it for a key that never expires. The plaintext secret is returned only here.
+   */
   async createApiKey(
     accountId: string,
-    displayName: string,
+    name: string,
     scopes: string[],
-    expiresAt?: string
+    expiry?: { days?: number; hours?: number }
   ): Promise<ApiKeyCreateResult> {
-    return this.post<ApiKeyCreateResult>("/api-keys", {
-      accountId,
-      displayName,
+    return this.post<ApiKeyCreateResult>(`/accounts/${accountId}/api-keys`, {
+      name,
       scopes,
-      expiresAt,
+      expiry: expiry ? formatTimeSpan(expiry) : null,
     });
   }
 
   async listApiKeys(accountId: string): Promise<ApiKey[]> {
-    return this.get<ApiKey[]>(`/api-keys?accountId=${accountId}`);
+    return this.get<ApiKey[]>(`/accounts/${accountId}/api-keys`);
   }
 
-  async revokeApiKey(keyId: string): Promise<void> {
-    await this.post(`/api-keys/${keyId}/revoke`, {});
+  /** Revokes a key and returns it. */
+  async revokeApiKey(accountId: string, keyId: string): Promise<ApiKey> {
+    return this.deleteFor<ApiKey>(`/accounts/${accountId}/api-keys/${keyId}`);
   }
 
   // ─── HTTP helpers ─────────────────────────────────────────────────────────────
@@ -369,11 +540,15 @@ export class FabricateClient {
   }
 
   private async delete(path: string): Promise<void> {
+    await this.deleteFor<unknown>(path);
+  }
+
+  private async deleteFor<T>(path: string): Promise<T> {
     const res = await this.fetchFn(`${this.baseUrl}${path}`, {
       method: "DELETE",
       headers: this.headers(),
     });
-    await this.handleResponse<unknown>(res);
+    return this.handleResponse<T>(res);
   }
 
   private async send<T>(method: string, path: string, body: unknown): Promise<T> {
@@ -461,6 +636,20 @@ function parseBlock(block: string): { event: string; data: unknown } | null {
   } catch {
     return { event, data: raw };
   }
+}
+
+function usageQuery({ from, to, groupBy }: { from?: string; to?: string; groupBy?: LlmUsageGrouping }): string {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  if (groupBy) params.set("groupBy", groupBy);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+/** Formats a lifetime as the .NET TimeSpan string the API binds (`d.hh:mm:ss`). */
+function formatTimeSpan({ days = 0, hours = 0 }: { days?: number; hours?: number }): string {
+  return `${days}.${String(hours).padStart(2, "0")}:00:00`;
 }
 
 function sleep(ms: number): Promise<void> {

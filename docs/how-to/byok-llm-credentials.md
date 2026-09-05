@@ -15,18 +15,65 @@ are encrypted at rest, write-only through the API, and never appear in logs, res
 
 ## Which credential a turn uses
 
-1. A credential bound to the session's project.
-2. The workspace default for the provider.
-3. The workspace's single active credential, if there is exactly one.
-4. The platform credential, if the workspace policy (or the instance setting) allows it.
-5. None — the chat returns a notice explaining how to register one; `/tool …` commands still work.
+1. A **personal** credential the requesting member bound to this session.
+2. A **personal** credential the requesting member registered for this workspace.
+3. A credential bound to the session's project.
+4. The workspace default for the provider.
+5. The workspace's single active credential, if there is exactly one.
+6. The platform credential, if the workspace policy (or the instance setting) allows it.
+7. None — the chat returns a notice explaining how to register one; `/tool …` commands still work.
 
 Revoked credentials are never resolved, and revocation takes effect on the next turn.
+
+## Personal credentials
+
+By default every member of a workspace shares one key, one bill and one quota. A member who holds their own
+provider account — or a contractor who should not spend the workspace's quota — can register a **personal**
+credential instead:
+
+```http
+POST /workspaces/{workspaceId}/llm-credentials
+{
+  "name": "my-anthropic",
+  "provider": "Anthropic",
+  "model": "claude-opus-5",
+  "secret": "sk-ant-…",
+  "isPersonal": true,
+  "sessionId": null
+}
+```
+
+| | Shared credential | Personal credential |
+|---|---|---|
+| Who can register | Workspace **Admin** | Any workspace member, for themselves |
+| Who can read, rotate or validate | Workspace Admin | **Only the owner** |
+| Who can revoke | Workspace Admin | The owner, or a workspace Admin |
+| Who sees it in a list | Every member | The owner, plus Admins as a redacted summary |
+| Whose sessions use it | Everyone's, by precedence | Only the owner's |
+
+Setting `sessionId` binds the credential to one chat session; it is used for that session and no other.
+
+Names are unique **within their scope**, so two members may each have one called `default`.
+
+An Admin can see that a member holds a personal credential — owner, provider, fingerprint, last four, status — for
+governance, and can revoke it so that offboarding does not need the member's cooperation. An Admin cannot read,
+rotate, validate or use it: validation makes a real provider call, so it counts as using it.
+
+A personal credential stops being usable in three ways, none of which needs a cleanup job:
+
+- Its owner **loses access to the workspace**. Access is re-checked on every resolve, because it can also be lost
+  by a group membership changing, and a cleanup that can be missed is not a control.
+- A workspace Admin **turns personal credentials off** on the policy.
+- It is revoked.
+
+A personal credential is never picked up by the workspace rungs, so one member's key can never become everyone's
+fallback.
 
 ## Endpoints
 
 All under `/workspaces/{workspaceId}/llm-credentials` and authenticated with an API key. Register, rotate, revoke and
-policy changes require the workspace **Admin** role; list and validate need any workspace role. A credential id
+policy changes require the workspace **Admin** role, except for personal credentials, which their owner manages
+themselves (see [Personal credentials](#personal-credentials)); list needs any workspace role. A credential id
 belonging to another workspace returns `404`, never `403`, so there is no existence oracle.
 
 ### Register
@@ -112,8 +159,20 @@ immediately.
 ```http
 GET  /workspaces/{workspaceId}/llm-credentials/policy
 PUT  /workspaces/{workspaceId}/llm-credentials/policy
-{ "allowPlatformFallback": true }
+{
+  "allowPlatformFallback": true,
+  "allowPersonalCredentials": false,
+  "dailyTokenBudget": 200000,
+  "monthlyTokenBudget": 4000000
+}
 ```
+
+Omit a field to leave it unchanged. `allowPersonalCredentials` defaults to `true`; setting it to `false` both
+blocks new personal credentials and makes existing ones unresolvable immediately — a workspace that must run
+everything through one shared, audited key gets that with a single switch, and it takes effect on the next turn
+rather than after a cleanup.
+
+Budgets are in [the user guide](../user-guide.md#llm-usage-and-token-budgets).
 
 ## Storage and encryption
 

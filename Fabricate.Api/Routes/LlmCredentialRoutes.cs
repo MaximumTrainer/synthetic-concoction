@@ -24,7 +24,7 @@ public static class LlmCredentialRoutes
         {
             var summary = await service.RegisterAsync(
                 new RegisterLlmCredentialCommand(workspaceId, req.ProjectId, req.Name, req.Provider, req.Kind, req.Secret ?? string.Empty,
-                    req.Model, req.Endpoint, req.NonSecretSettings, req.IsDefault),
+                    req.Model, req.Endpoint, req.NonSecretSettings, req.IsDefault, req.IsPersonal, req.SessionId),
                 ctx.GetUserId(), ct).ConfigureAwait(false);
             return Results.Created($"/workspaces/{workspaceId}/llm-credentials/{summary.Id}", summary);
         }).WithName("RegisterLlmCredential");
@@ -82,7 +82,20 @@ public static class LlmCredentialRoutes
             ILlmCredentialService service,
             HttpContext ctx,
             CancellationToken ct) =>
-            Results.Ok(await service.SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, ct).ConfigureAwait(false)))
+        {
+            try
+            {
+                return Results.Ok(await service
+                    .SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, req.AllowSampledDataInPrompts, req.DailyTokenBudget, req.MonthlyTokenBudget, req.AllowPersonalCredentials, ct)
+                    .ConfigureAwait(false));
+            }
+            catch (InvalidOperationException ex)
+            {
+                // The sampled-data opt-in is refused outright on a Healthcare or Finance workspace (#83). A 409
+                // rather than a 400: the request is well-formed, it conflicts with the workspace's own profile.
+                return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
+            }
+        })
             .WithName("SetWorkspaceLlmPolicy");
 
         return group;
@@ -98,8 +111,20 @@ public sealed record RegisterLlmCredentialRequest(
     string? Endpoint = null,
     Guid? ProjectId = null,
     IReadOnlyDictionary<string, string>? NonSecretSettings = null,
-    bool IsDefault = false);
+    bool IsDefault = false,
+    bool IsPersonal = false,
+    Guid? SessionId = null);
 
 public sealed record RotateLlmCredentialRequest(string Secret);
 /// <param name="AllowedTools">Null leaves the tool allowlist unchanged; an empty array offers the model no tools.</param>
-public sealed record SetLlmPolicyRequest(bool AllowPlatformFallback, IReadOnlyList<string>? AllowedTools = null);
+/// <param name="DailyTokenBudget">
+/// Tokens per UTC day, or <c>-1</c> to clear the cap. Omit to leave unchanged (#77).
+/// </param>
+/// <param name="MonthlyTokenBudget">Tokens per UTC calendar month, or <c>-1</c> to clear. Omit to leave unchanged.</param>
+public sealed record SetLlmPolicyRequest(
+    bool AllowPlatformFallback,
+    IReadOnlyList<string>? AllowedTools = null,
+    bool? AllowSampledDataInPrompts = null,
+    long? DailyTokenBudget = null,
+    long? MonthlyTokenBudget = null,
+    bool? AllowPersonalCredentials = null);

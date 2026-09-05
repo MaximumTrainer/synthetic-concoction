@@ -27,18 +27,21 @@ public sealed class PromptInjectionTests
     private readonly RecordingTool _dangerous = new("dangerous");
     private readonly EchoingTool _lookup = new("lookup", Injection);
     private readonly AgentChatService _chat;
+    private readonly InMemoryWorkspaceRepository _workspaceRepo = new();
+    private readonly InMemoryAuditLogRepository _auditRepo = new();
 
     public PromptInjectionTests()
     {
-        var audit = new AuditLogService(new InMemoryAuditLogRepository());
-        _workspaceService = new WorkspaceService(audit);
+        var audit = new AuditLogService(_auditRepo, new InMemoryAccountRepository());
+        _workspaceService = new WorkspaceService(_workspaceRepo, new InMemoryAccountGroupRepository(), audit);
         _toolRegistry.Register(_dangerous);
         _toolRegistry.Register(_lookup);
 
         var credential = new ResolvedLlmCredential(LlmProvider.Anthropic, LlmCredentialKind.ApiKey, "claude-opus-5", "sk-test", null,
             new Dictionary<string, string>(), LlmCredentialSource.WorkspaceDefault);
-        _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, new InstructionVersionService(_workspaceService),
-            new FixedResolver(credential), new FixedFactory(_client), new HeuristicTokenBudgetEstimator(), _policyStore, new LlmOptions());
+        _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService),
+            new FixedResolver(credential), new FixedFactory(_client), new HeuristicTokenBudgetEstimator(), _policyStore,
+            audit, _workspaceRepo, new PromptDataBoundary(), new UnlimitedUsage(), new LlmOptions());
     }
 
     private async Task<(Guid wsId, Guid userId, ChatSession session)> CreateSessionAsync()
@@ -156,12 +159,15 @@ public sealed class PromptInjectionTests
 
     private sealed class FixedFactory(IChatCompletionClient client) : IChatCompletionClientFactory
     {
-        public IChatCompletionClient Create(ResolvedLlmCredential credential) => client;
+        public IChatCompletionClient Create(ResolvedLlmCredential credential, LlmCallContext? context = null) => client;
     }
 
     private sealed class FixedResolver(ResolvedLlmCredential? credential) : ILlmCredentialResolver
     {
         public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
+            => Task.FromResult(credential);
+
+        public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, Guid? userId, Guid? sessionId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
             => Task.FromResult(credential);
     }
 
@@ -185,4 +191,18 @@ public sealed class PromptInjectionTests
         public Task<string> ExecuteAsync(string inputJson, Guid sessionId, Guid userId, CancellationToken ct = default)
             => Task.FromResult(System.Text.Json.JsonSerializer.Serialize(new { result = output }));
     }
+
+    /// <summary>No budget configured, so every turn proceeds. #77's enforcement has its own tests.</summary>
+    private sealed class UnlimitedUsage : ILlmUsageService
+    {
+        public Task<LlmUsageSummary> GetWorkspaceUsageAsync(Guid workspaceId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmUsageSummary> GetAccountUsageAsync(Guid accountId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmBudgetVerdict> CheckBudgetAsync(Guid workspaceId, CancellationToken cancellationToken = default)
+            => Task.FromResult(LlmBudgetVerdict.Allowed);
+    }
+
 }

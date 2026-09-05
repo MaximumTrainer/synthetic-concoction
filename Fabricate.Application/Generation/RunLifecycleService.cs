@@ -9,9 +9,19 @@ public sealed class RunLifecycleService(
     IArtifactStore artifactStore,
     IWebhookDeliveryService? webhookDeliveryService = null)
 {
-    public async Task<DatasetRun> StartRunAsync(long seed, IReadOnlyDictionary<string, int> requestedRowCounts, CancellationToken cancellationToken = default)
+    public async Task<DatasetRun> StartRunAsync(
+        long seed,
+        IReadOnlyDictionary<string, int> requestedRowCounts,
+        Guid? workspaceId = null,
+        Guid? projectId = null,
+        Guid? schemaSnapshotId = null,
+        CancellationToken cancellationToken = default)
     {
-        var run = new DatasetRun(Guid.NewGuid(), RunStatus.Queued, DateTimeOffset.UtcNow, null, null, seed, null, null, requestedRowCounts);
+        var run = new DatasetRun(
+            Guid.NewGuid(), RunStatus.Queued, DateTimeOffset.UtcNow, null, null, seed,
+            schemaSnapshotId, null, requestedRowCounts,
+            WorkspaceId: workspaceId, ProjectId: projectId);
+
         return await runRepository.CreateAsync(run, cancellationToken).ConfigureAwait(false);
     }
 
@@ -87,6 +97,10 @@ public sealed class RunLifecycleService(
 
     public Task<IReadOnlyList<DatasetRun>> ListRunsAsync(int pageSize = 20, int page = 1, CancellationToken cancellationToken = default)
         => runRepository.ListAsync(pageSize, page, cancellationToken);
+
+    /// <summary>One workspace's runs (#66). The unscoped overload stays for the CLI, which has no tenant.</summary>
+    public Task<IReadOnlyList<DatasetRun>> ListRunsAsync(Guid workspaceId, int pageSize = 20, int page = 1, CancellationToken cancellationToken = default)
+        => runRepository.ListByWorkspaceAsync(workspaceId, pageSize, page, cancellationToken);
 
     private async Task<DatasetRun> GetOrThrowAsync(Guid runId, CancellationToken cancellationToken)
     {

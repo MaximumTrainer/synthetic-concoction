@@ -141,6 +141,12 @@ public interface IProfileSnapshotRepository
     Task SaveAsync(ProfileSnapshot snapshot, CancellationToken cancellationToken = default);
     Task<ProfileSnapshot?> GetLatestAsync(string databaseName, CancellationToken cancellationToken = default);
     Task<ProfileSnapshot?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>One workspace's snapshots, newest first (#75).</summary>
+    Task<IReadOnlyList<ProfileSnapshot>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>The highest version number issued in this workspace, or 0 when it has none.</summary>
+    Task<int> MaxVersionAsync(Guid workspaceId, CancellationToken cancellationToken = default);
 }
 
 public interface ISchemaSnapshotRepository
@@ -148,6 +154,12 @@ public interface ISchemaSnapshotRepository
     Task SaveAsync(SchemaSnapshot snapshot, CancellationToken cancellationToken = default);
     Task<SchemaSnapshot?> GetLatestAsync(string databaseName, CancellationToken cancellationToken = default);
     Task<SchemaSnapshot?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>One workspace's snapshots, newest first (#75).</summary>
+    Task<IReadOnlyList<SchemaSnapshot>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>The highest version number issued in this workspace, or 0 when it has none.</summary>
+    Task<int> MaxVersionAsync(Guid workspaceId, CancellationToken cancellationToken = default);
 }
 
 public interface ISchemaReviewService
@@ -183,6 +195,9 @@ public interface IRunRepository
     Task<DatasetRun> UpdateAsync(DatasetRun run, CancellationToken cancellationToken = default);
     Task<DatasetRun?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DatasetRun>> ListAsync(int pageSize = 20, int page = 1, CancellationToken cancellationToken = default);
+
+    /// <summary>One workspace's runs, newest first (#66). The unscoped list above is for the CLI and internals.</summary>
+    Task<IReadOnlyList<DatasetRun>> ListByWorkspaceAsync(Guid workspaceId, int pageSize = 20, int page = 1, CancellationToken cancellationToken = default);
 }
 
 public interface IArtifactStore
@@ -190,6 +205,55 @@ public interface IArtifactStore
     Task<string> StoreAsync(string runId, string name, Stream content, CancellationToken cancellationToken = default);
     Task<Stream> RetrieveAsync(string path, CancellationToken cancellationToken = default);
     Task<bool> ExistsAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>Everything stored for one run, so the API can publish a manifest without walking the store (#66).</summary>
+    Task<IReadOnlyList<StoredArtifact>> ListAsync(string runId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// One stored artifact. <paramref name="Name"/> is what the API addresses it by; <paramref name="Path"/> is the
+/// store's own locator and is never returned to a caller — it would disclose the host's directory layout.
+/// </summary>
+public sealed record StoredArtifact(string Name, string Path, long SizeBytes);
+
+// ── #66: starting runs and reading artifacts through the API ─────────────────
+
+/// <param name="Exporters">
+/// Formats to write. Defaults to csv when empty, matching the CLI's own default.
+/// </param>
+public sealed record StartRunCommand(
+    Guid WorkspaceId,
+    Guid? ProjectId,
+    IReadOnlyDictionary<string, int> RowCounts,
+    long Seed,
+    Guid? SchemaSnapshotId = null,
+    RuleConfiguration? Rules = null,
+    ComplianceProfile ComplianceProfile = ComplianceProfile.Default,
+    IReadOnlyList<string>? Exporters = null);
+
+/// <summary>An artifact as the API describes it: addressable name, size, checksum and media type.</summary>
+public sealed record ArtifactDescriptor(string Name, long SizeBytes, string Sha256, string ContentType);
+
+public interface IRunExecutionService
+{
+    /// <summary>
+    /// Runs a generation end to end and stores its artifacts against the run. Produces the same files and
+    /// summary.json the CLI writes for the same inputs — the CLI and this share the orchestrator and exporters.
+    /// </summary>
+    Task<DatasetRun> StartAsync(StartRunCommand command, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>One workspace's runs. A run in another workspace is not listed and not found.</summary>
+    Task<IReadOnlyList<DatasetRun>> ListAsync(Guid workspaceId, Guid requestingUserId, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default);
+
+    Task<DatasetRun?> GetAsync(Guid workspaceId, Guid runId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    Task<DatasetRun?> CancelAsync(Guid workspaceId, Guid runId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>The run's artifact manifest, or null when the run is not the caller's to see.</summary>
+    Task<IReadOnlyList<ArtifactDescriptor>?> ListArtifactsAsync(Guid workspaceId, Guid runId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Opens one artifact for reading, or null when the run or the artifact is not found.</summary>
+    Task<(Stream Content, ArtifactDescriptor Descriptor)?> OpenArtifactAsync(Guid workspaceId, Guid runId, string name, Guid requestingUserId, CancellationToken cancellationToken = default);
 }
 
 // ── #26: Account foundation ports ────────────────────────────────────────────
@@ -261,22 +325,149 @@ public interface IAllowedDomainService
 
 public sealed record AuditPage(IReadOnlyList<AuditEvent> Events, int TotalCount, int Page, int PageSize);
 
+/// <summary>
+/// Filters for reading the audit log (#72). <paramref name="Action"/> matches anywhere in the action name;
+/// <paramref name="ActionPrefix"/> anchors at the start, which is what makes a whole family — <c>chat.</c>,
+/// <c>api.</c> — selectable now that per-request usage shares the log with security events.
+/// </summary>
+public sealed record AuditFilter(
+    string? Action = null,
+    string? ActionPrefix = null,
+    Guid? ApiKeyId = null)
+{
+    public static readonly AuditFilter None = new();
+
+    public bool IsEmpty => Action is null && ActionPrefix is null && ApiKeyId is null;
+}
+
+// ── #77: LLM usage attribution and token budgets ──────────────────────────────
+
+/// <summary>
+/// Identifies the work a provider call belongs to, so the usage record can be attributed. Carried alongside the
+/// credential rather than on it: a credential is shared across sessions, the context is not.
+/// </summary>
+public sealed record LlmCallContext(Guid WorkspaceId, Guid? ProjectId = null, Guid? SessionId = null);
+
+/// <summary>
+/// Writes one usage record per provider attempt. Failures to record must never fail the call — usage accounting
+/// is bookkeeping, and losing a row is better than losing the user's answer.
+/// </summary>
+public interface ILlmUsageRecorder
+{
+    Task RecordAsync(LlmUsageRecord record, CancellationToken cancellationToken = default);
+}
+
+public interface ILlmUsageRepository : ILlmUsageRecorder
+{
+    /// <summary>Rolls up one workspace's usage over a window.</summary>
+    Task<LlmUsageSummary> SummariseWorkspaceAsync(
+        Guid workspaceId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        LlmUsageGrouping groupBy,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Rolls up every workspace in the set — the account-level view.</summary>
+    Task<LlmUsageSummary> SummariseWorkspacesAsync(
+        IReadOnlyCollection<Guid> workspaceIds,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        LlmUsageGrouping groupBy,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Total tokens a workspace consumed in a window; the number budgets are checked against.</summary>
+    Task<long> TotalTokensAsync(
+        Guid workspaceId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ILlmUsageService
+{
+    Task<LlmUsageSummary> GetWorkspaceUsageAsync(
+        Guid workspaceId,
+        Guid requestingUserId,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        LlmUsageGrouping groupBy = LlmUsageGrouping.Model,
+        CancellationToken cancellationToken = default);
+
+    Task<LlmUsageSummary> GetAccountUsageAsync(
+        Guid accountId,
+        Guid requestingUserId,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        LlmUsageGrouping groupBy = LlmUsageGrouping.Model,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether the workspace has room in its daily and monthly budgets. Returns the reason when it does not, for
+    /// the notice the user sees.
+    /// </summary>
+    Task<LlmBudgetVerdict> CheckBudgetAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>The outcome of a budget check. <paramref name="Reason"/> is empty when the call may proceed.</summary>
+public sealed record LlmBudgetVerdict(bool IsWithinBudget, string Reason)
+{
+    public static readonly LlmBudgetVerdict Allowed = new(true, string.Empty);
+}
+
 public interface IAuditLogService
 {
     Task RecordAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default);
     Task<AuditPage> QueryAsync(Guid accountId, int page = 1, int pageSize = 50, string? actionFilter = null, CancellationToken cancellationToken = default);
+
+    /// <summary>One page of the audit log under the full filter set (#72).</summary>
+    Task<AuditPage> QueryAsync(Guid accountId, AuditFilter filter, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams one account's events, oldest first, for export. Only account owners may export (#74), and every
+    /// event's <see cref="AuditEvent.Details"/> is redacted on the way out — the log is written by many call
+    /// sites, so the export must not trust that none of them recorded something sensitive.
+    /// </summary>
+    IAsyncEnumerable<AuditEvent> ExportAsync(
+        Guid accountId,
+        Guid requestingUserId,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes events older than the configured window across every account, in batches. Returns the number
+    /// removed; zero when retention is disabled. The purge audits itself as <c>audit.retention_applied</c>.
+    /// </summary>
+    Task<int> ApplyRetentionAsync(CancellationToken cancellationToken = default);
 }
 
 public interface IAuditLogRepository
 {
     Task AppendAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<AuditEvent>> QueryAsync(Guid accountId, int skip, int take, string? actionFilter, CancellationToken cancellationToken = default);
-    Task<int> CountAsync(Guid accountId, string? actionFilter, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AuditEvent>> QueryAsync(Guid accountId, AuditFilter filter, int skip, int take, CancellationToken cancellationToken = default);
+    Task<int> CountAsync(Guid accountId, AuditFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>One account's events in a window, oldest first. Streamed so an export never buffers the log.</summary>
+    IAsyncEnumerable<AuditEvent> StreamAsync(
+        Guid accountId,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes events strictly older than <paramref name="cutoff"/>, at most <paramref name="batchSize"/> per
+    /// statement so a large backlog does not hold a long write lock. Returns the number deleted.
+    /// </summary>
+    Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken = default);
 }
 
 // ── #28: Workspace ports ──────────────────────────────────────────────────────
 
-public sealed record CreateWorkspaceCommand(Guid AccountId, string Name, Guid CreatedByUserId);
+public sealed record CreateWorkspaceCommand(
+    Guid AccountId,
+    string Name,
+    Guid CreatedByUserId,
+    ComplianceProfile ComplianceProfile = ComplianceProfile.Default);
 public sealed record GrantWorkspaceAccessCommand(Guid WorkspaceId, Guid PrincipalId, bool IsGroup, WorkspaceRole Role, Guid RequestingUserId);
 
 public interface IWorkspaceService
@@ -290,10 +481,53 @@ public interface IWorkspaceService
 
 public interface IConnectionCatalogService
 {
-    Task<Connection> AddConnectionAsync(Guid workspaceId, string name, string provider, Guid requestingUserId, CancellationToken cancellationToken = default);
-    Task<Connection> UpdateStatusAsync(Guid connectionId, string status, Guid requestingUserId, Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<ConnectionSummary> AddConnectionAsync(Guid workspaceId, string name, string provider, Guid requestingUserId, string? connectionString = null, CancellationToken cancellationToken = default);
+    Task<ConnectionSummary> UpdateStatusAsync(Guid connectionId, string status, Guid requestingUserId, Guid workspaceId, CancellationToken cancellationToken = default);
     Task RemoveConnectionAsync(Guid connectionId, Guid requestingUserId, Guid workspaceId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<Connection>> ListAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ConnectionSummary>> ListAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>One connection, or null when it belongs to another workspace (#69).</summary>
+    Task<ConnectionSummary?> GetAsync(Guid workspaceId, Guid connectionId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Replaces the stored connection string. The old one is not recoverable afterwards.</summary>
+    Task<ConnectionSummary> RotateAsync(Guid workspaceId, Guid connectionId, string connectionString, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Opens the connection and runs the provider's cheapest liveness check. Reports reachability without
+    /// disclosing the connection string, including in the failure message.
+    /// </summary>
+    Task<ConnectionValidationResult> ValidateAsync(Guid workspaceId, Guid connectionId, Guid requestingUserId, CancellationToken cancellationToken = default);
+}
+
+public sealed record ConnectionValidationResult(Guid ConnectionId, bool IsReachable, string Message, DateTimeOffset CheckedAt);
+
+/// <summary>
+/// Builds a schema provider for one workspace connection (#69). Discovery used a single instance-level provider,
+/// so every chat session introspected the operator's own database whatever workspace it belonged to.
+/// </summary>
+public interface ISchemaProviderFactory
+{
+    /// <summary>Providers this factory can build, for error messages and validation.</summary>
+    IReadOnlyList<string> SupportedProviders { get; }
+
+    ISchemaProvider Create(string provider, string connectionString);
+}
+
+/// <summary>
+/// Resolves the schema provider for one chat session. A delegate rather than an interface because the tool
+/// registry is a singleton and the resolver's dependencies are scoped: the composition root supplies this with a
+/// scope of its own, so nothing captures a DbContext for the process (#69, #78).
+/// </summary>
+public delegate Task<ISchemaProvider?> SessionSchemaProviderResolver(Guid sessionId, CancellationToken cancellationToken);
+
+/// <summary>Resolves the connection a chat session should introspect, decrypting it only for that call.</summary>
+public interface IConnectionResolver
+{
+    /// <summary>
+    /// The schema provider for a session's project database or workspace connection, or null when the workspace
+    /// has none — in which case the caller falls back to the instance-level provider.
+    /// </summary>
+    Task<ISchemaProvider?> ResolveAsync(Guid workspaceId, Guid? projectId, CancellationToken cancellationToken = default);
 }
 
 public interface ISecretProvider
@@ -321,6 +555,80 @@ public interface IProjectRepository
     Task<Project> SaveAsync(Project project, CancellationToken cancellationToken = default);
     Task<Project?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Project>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+// ── #65: repositories for the remaining platform aggregates ──────────────────
+// These aggregates previously lived in List<> fields inside their Application services, so they were lost on
+// restart even with a database configured. Every one now has an in-memory and an EF adapter.
+
+public interface IWorkspaceRepository
+{
+    Task<Workspace> SaveAsync(Workspace workspace, CancellationToken cancellationToken = default);
+    Task<Workspace?> GetByIdAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Workspace>> ListByAccountAsync(Guid accountId, CancellationToken cancellationToken = default);
+    Task<WorkspaceMembership> SaveMembershipAsync(WorkspaceMembership membership, CancellationToken cancellationToken = default);
+    Task RemoveMembershipAsync(Guid workspaceId, Guid principalId, bool isGroup, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WorkspaceMembership>> ListMembershipsAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+public interface IConnectionRepository
+{
+    Task<Connection> SaveAsync(Connection connection, CancellationToken cancellationToken = default);
+    Task<Connection?> GetByIdAsync(Guid connectionId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Connection>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid connectionId, CancellationToken cancellationToken = default);
+}
+
+public interface IInstructionVersionRepository
+{
+    Task<InstructionVersion> SaveAsync(InstructionVersion version, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InstructionVersion>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InstructionVersion>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+}
+
+public interface IProjectDatabaseRepository
+{
+    Task<ProjectDatabase> SaveAsync(ProjectDatabase database, CancellationToken cancellationToken = default);
+    Task<ProjectDatabase?> GetByIdAsync(Guid databaseId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProjectDatabase>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid databaseId, CancellationToken cancellationToken = default);
+}
+
+public interface IWorkflowRepository
+{
+    Task<Workflow> SaveAsync(Workflow workflow, CancellationToken cancellationToken = default);
+    Task<Workflow?> GetByIdAsync(Guid workflowId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Workflow>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<WorkflowStep> SaveStepAsync(WorkflowStep step, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WorkflowStep>> ListStepsAsync(Guid workflowId, CancellationToken cancellationToken = default);
+    Task<WorkflowRun> SaveRunAsync(WorkflowRun run, CancellationToken cancellationToken = default);
+    Task<WorkflowRun?> GetRunAsync(Guid runId, CancellationToken cancellationToken = default);
+    Task<WorkflowStepRun> SaveStepRunAsync(WorkflowStepRun stepRun, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WorkflowStepRun>> ListStepRunsAsync(Guid runId, CancellationToken cancellationToken = default);
+}
+
+public interface ISkillRepository
+{
+    Task<Skill> SaveAsync(Skill skill, CancellationToken cancellationToken = default);
+    Task<Skill?> GetByIdAsync(Guid skillId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Skill>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+public interface IAccountGroupRepository
+{
+    Task<AccountGroup> SaveAsync(AccountGroup group, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AccountGroup>> ListByAccountAsync(Guid accountId, CancellationToken cancellationToken = default);
+    Task<GroupMembership> AddMemberAsync(GroupMembership membership, CancellationToken cancellationToken = default);
+    Task RemoveMemberAsync(Guid groupId, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>Groups the user belongs to, across the whole instance; callers scope by account.</summary>
+    Task<IReadOnlyList<Guid>> ListGroupIdsForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+}
+
+public interface IAllowedDomainRepository
+{
+    Task<AllowedDomain> SaveAsync(AllowedDomain domain, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AllowedDomain>> ListByAccountAsync(Guid accountId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid domainId, CancellationToken cancellationToken = default);
 }
 
 public sealed record CreateProjectCommand(Guid WorkspaceId, string Name, Guid CreatedByUserId);
@@ -351,6 +659,14 @@ public interface ITool
 
     /// <summary>JSON Schema for the tool's input object, advertised to the model. Defaults to an open object.</summary>
     string InputSchemaJson => """{"type":"object","properties":{},"additionalProperties":true}""";
+
+    /// <summary>
+    /// The most sensitive class of content this tool's result can carry (#83). Defaults to
+    /// <see cref="Llm.PromptContentClass.Metadata"/> — names and shapes — because that is what every tool that
+    /// exists today returns. A tool that samples rows or computes statistics over them must say so: the prompt
+    /// data boundary uses this to decide whether the tool is offered to the model at all.
+    /// </summary>
+    Llm.PromptContentClass ContentClass => Llm.PromptContentClass.Metadata;
 
     Task<string> ExecuteAsync(string inputJson, Guid sessionId, Guid userId, CancellationToken cancellationToken = default);
 }
@@ -484,18 +800,75 @@ public interface IApiContractIngestionService
     Task<IReadOnlyList<GeneratedApiEndpoint>> IngestAsync(string openApiJson, Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
 }
 
+// ── #70: serving generated endpoints from ingested contracts ─────────────────
+
+public sealed record IngestContractCommand(Guid WorkspaceId, string Name, string DocumentJson);
+
+/// <param name="ClearBinding">Unbinds the endpoint. Distinguishes "leave alone" from "unbind" for nullable fields.</param>
+public sealed record BindEndpointCommand(
+    Guid? ArtifactRunId = null,
+    string? BoundTable = null,
+    bool? IsActive = null,
+    bool ClearBinding = false);
+
+public interface IApiContractRepository
+{
+    Task<ApiContract> SaveAsync(ApiContract contract, CancellationToken cancellationToken = default);
+    Task<ApiContract?> GetByIdAsync(Guid contractId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ApiContract>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+
+    Task<GeneratedApiEndpoint> SaveEndpointAsync(GeneratedApiEndpoint endpoint, CancellationToken cancellationToken = default);
+    Task<GeneratedApiEndpoint?> GetEndpointAsync(Guid endpointId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GeneratedApiEndpoint>> ListEndpointsAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Ingests contracts, binds their endpoints to generated data, and serves them (#70). The ingestion service
+/// parsed a document into endpoints that nothing stored and nothing served.
+/// </summary>
+public interface IGeneratedApiService
+{
+    Task<ApiContract> IngestAsync(IngestContractCommand command, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ApiContract>> ListContractsAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<GeneratedApiEndpoint>> ListEndpointsAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Binds an endpoint to a run and table, or toggles it. Validates the bound rows against the contract's
+    /// response schema and records any mismatch as a diagnostic rather than letting it surface at request time.
+    /// </summary>
+    /// <remarks>
+    /// Named BindEndpointAsync, not BindAsync: minimal APIs treat any parameter type declaring a <c>BindAsync</c>
+    /// method as a custom model binder, so the name makes the whole service unusable as a route parameter.
+    /// </remarks>
+    Task<GeneratedApiEndpoint?> BindEndpointAsync(Guid workspaceId, Guid endpointId, BindEndpointCommand command, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Serves a request against the workspace's active endpoints. Null means no endpoint matched, is bound, or is
+    /// servable — all of which are a 404 to the caller.
+    /// </summary>
+    Task<GeneratedApiResponse?> ServeAsync(Guid workspaceId, string method, string path, Guid requestingUserId, CancellationToken cancellationToken = default);
+}
+
+public sealed record GeneratedApiResponse(string Json, string OperationId, Guid EndpointId, int StatusCode = 200);
+
+/// <summary>
+/// Snapshot reads take the workspace so a snapshot belonging to another one is not found (#75) — a stored schema
+/// describes a customer's database, and its id must not be an existence oracle across tenants.
+/// </summary>
 public interface ISchemaSnapshotService
 {
     Task<SchemaSnapshot> SaveSnapshotAsync(Guid workspaceId, DatabaseSchema schema, CancellationToken cancellationToken = default);
-    Task<SchemaSnapshot?> GetSnapshotAsync(Guid snapshotId, CancellationToken cancellationToken = default);
+    Task<SchemaSnapshot?> GetSnapshotAsync(Guid workspaceId, Guid snapshotId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SchemaSnapshot>> ListSnapshotsAsync(Guid workspaceId, CancellationToken cancellationToken = default);
-    Task<DatabaseSchema?> RestoreSchemaAsync(Guid snapshotId, CancellationToken cancellationToken = default);
+    Task<DatabaseSchema?> RestoreSchemaAsync(Guid workspaceId, Guid snapshotId, CancellationToken cancellationToken = default);
 }
 
 public interface IProfileSnapshotService
 {
     Task<ProfileSnapshot> SaveProfileAsync(Guid workspaceId, ProfileSnapshot profile, CancellationToken cancellationToken = default);
-    Task<ProfileSnapshot?> GetProfileAsync(Guid profileId, CancellationToken cancellationToken = default);
+    Task<ProfileSnapshot?> GetProfileAsync(Guid workspaceId, Guid profileId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProfileSnapshot>> ListProfilesAsync(Guid workspaceId, CancellationToken cancellationToken = default);
 }
 
@@ -595,13 +968,19 @@ public interface IChatCompletionClient
 /// <summary>Builds a client for a resolved credential. Implemented in Infrastructure; the only place vendor SDKs are referenced.</summary>
 public interface IChatCompletionClientFactory
 {
-    IChatCompletionClient Create(Llm.ResolvedLlmCredential credential);
+    IChatCompletionClient Create(Llm.ResolvedLlmCredential credential, LlmCallContext? context = null);
 }
 
 /// <summary>Resolves which credential a chat turn executes under. Returns <c>null</c> when none is configured.</summary>
 public interface ILlmCredentialResolver
 {
     Task<Llm.ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves with the requesting member and session in hand, so the personal rungs can apply (#85). The
+    /// shorter overload remains for callers with no user context — they simply never reach those rungs.
+    /// </summary>
+    Task<Llm.ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, Guid? userId, Guid? sessionId, LlmProvider? preferredProvider = null, CancellationToken cancellationToken = default);
 }
 
 public interface ILlmCredentialStore
@@ -626,6 +1005,12 @@ public interface ILlmCredentialProbe
     Task<LlmCredentialValidationResult> ProbeAsync(Guid credentialId, Llm.ResolvedLlmCredential credential, CancellationToken cancellationToken = default);
 }
 
+/// <param name="IsPersonal">
+/// Registers the credential to the requesting member rather than to the workspace (#85). A personal credential
+/// needs only workspace membership, not admin — it is the member's own key and their own bill — and only its
+/// owner can read, rotate or use it.
+/// </param>
+/// <param name="SessionId">Binds a personal credential to one chat session. Ignored unless IsPersonal.</param>
 public sealed record RegisterLlmCredentialCommand(
     Guid WorkspaceId,
     Guid? ProjectId,
@@ -636,7 +1021,9 @@ public sealed record RegisterLlmCredentialCommand(
     string Model,
     string? Endpoint = null,
     IReadOnlyDictionary<string, string>? NonSecretSettings = null,
-    bool IsDefault = false);
+    bool IsDefault = false,
+    bool IsPersonal = false,
+    Guid? SessionId = null);
 
 public interface ILlmCredentialService
 {
@@ -647,5 +1034,10 @@ public interface ILlmCredentialService
     Task<LlmCredentialValidationResult> ValidateAsync(Guid workspaceId, Guid credentialId, Guid requestingUserId, CancellationToken cancellationToken = default);
     Task<WorkspaceLlmPolicy> GetPolicyAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
     /// <param name="allowedTools">Null leaves the tool allowlist unchanged; an empty list offers the model no tools.</param>
-    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Updates the workspace's LLM policy. Setting <paramref name="allowSampledDataInPrompts"/> on a Healthcare or
+    /// Finance workspace throws <see cref="InvalidOperationException"/> and leaves the policy unchanged — the
+    /// opt-in is refused, not silently ignored, so an administrator is not left believing it took effect (#83).
+    /// </summary>
+    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, long? dailyTokenBudget = null, long? monthlyTokenBudget = null, bool? allowPersonalCredentials = null, CancellationToken cancellationToken = default);
 }

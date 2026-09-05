@@ -23,12 +23,16 @@ public sealed class AgentChatTurnTests
     private readonly InMemoryLlmCredentialStore _policyStore = new();
     private readonly RecordingTool _echoTool = new("echo");
     private readonly AgentChatService _chat;
+    private readonly UnlimitedUsage _usage = new();
+    private readonly InMemoryWorkspaceRepository _workspaceRepo = new();
+    private readonly InMemoryAuditLogRepository _auditRepo = new();
+    private readonly IAuditLogService _audit;
 
     public AgentChatTurnTests()
     {
-        var audit = new AuditLogService(new InMemoryAuditLogRepository());
-        _workspaceService = new WorkspaceService(audit);
-        _instructionService = new InstructionVersionService(_workspaceService);
+        _audit = new AuditLogService(_auditRepo, new InMemoryAccountRepository());
+        _workspaceService = new WorkspaceService(_workspaceRepo, new InMemoryAccountGroupRepository(), _audit);
+        _instructionService = new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService);
         _toolRegistry.Register(_echoTool);
         _toolRegistry.Register(new RecordingTool("dangerous"));
 
@@ -36,7 +40,8 @@ public sealed class AgentChatTurnTests
             new Dictionary<string, string>(), LlmCredentialSource.WorkspaceDefault);
 
         _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
-            new FixedResolver(credential), new FixedFactory(_client), _estimator, _policyStore, _options);
+            new FixedResolver(credential), new FixedFactory(_client), _estimator, _policyStore,
+            _audit, _workspaceRepo, new PromptDataBoundary(), _usage, _options);
     }
 
     [Fact]
@@ -289,7 +294,8 @@ public sealed class AgentChatTurnTests
     {
         var (_, userId, session) = await CreateSessionAsync();
         var chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
-            new FixedResolver(null), new FixedFactory(_client), _estimator, _policyStore, _options);
+            new FixedResolver(null), new FixedFactory(_client), _estimator, _policyStore,
+            _audit, _workspaceRepo, new PromptDataBoundary(), _usage, _options);
 
         var turn = await chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "hello"));
         turn.AssistantMessage!.Content.Should().Contain("No LLM credential is configured");
@@ -394,12 +400,15 @@ public sealed class AgentChatTurnTests
 
     private sealed class FixedFactory(IChatCompletionClient client) : IChatCompletionClientFactory
     {
-        public IChatCompletionClient Create(ResolvedLlmCredential credential) => client;
+        public IChatCompletionClient Create(ResolvedLlmCredential credential, LlmCallContext? context = null) => client;
     }
 
     private sealed class FixedResolver(ResolvedLlmCredential? credential) : ILlmCredentialResolver
     {
         public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
+            => Task.FromResult(credential);
+
+        public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, Guid? userId, Guid? sessionId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
             => Task.FromResult(credential);
     }
 
@@ -415,4 +424,36 @@ public sealed class AgentChatTurnTests
             return Task.FromResult($$"""{"echoed":{{inputJson}}}""");
         }
     }
+
+
+    [Fact]
+    public async Task AWorkspaceOverItsBudget_GetsANoticeAndTheProviderIsNotCalled()
+    {
+        var (_, userId, session) = await CreateSessionAsync();
+        _usage.Verdict = new LlmBudgetVerdict(false, "This workspace has used 500 of its 500 token daily budget.");
+        _client.Enqueue(Text("should never be produced"));
+
+        var turn = await _chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "hello"));
+
+        _client.Requests.Should().BeEmpty("a budget that only reports after the fact is not a budget");
+        turn.AssistantMessage!.Role.Should().Be(MessageRole.System);
+        turn.AssistantMessage.Content.Should().Contain("daily budget");
+        turn.Usage.TotalTokens.Should().Be(0);
+    }
+
+    /// <summary>Budget verdict the test controls, so the chat-level gate can be exercised (#77).</summary>
+    private sealed class UnlimitedUsage : ILlmUsageService
+    {
+        public LlmBudgetVerdict Verdict { get; set; } = LlmBudgetVerdict.Allowed;
+
+        public Task<LlmUsageSummary> GetWorkspaceUsageAsync(Guid workspaceId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmUsageSummary> GetAccountUsageAsync(Guid accountId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmBudgetVerdict> CheckBudgetAsync(Guid workspaceId, CancellationToken cancellationToken = default)
+            => Task.FromResult(Verdict);
+    }
+
 }

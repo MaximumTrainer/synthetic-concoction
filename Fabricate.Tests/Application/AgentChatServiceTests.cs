@@ -17,16 +17,18 @@ public sealed class AgentChatServiceTests
     private readonly WorkspaceService _workspaceService;
     private readonly InstructionVersionService _instructionService;
     private readonly InMemorySessionRepository _sessionRepo = new();
+    private readonly InMemoryWorkspaceRepository _workspaceRepo = new();
     private readonly AgentChatService _chatService;
 
     public AgentChatServiceTests()
     {
-        _auditLogService = new AuditLogService(_auditLogRepo);
-        _workspaceService = new WorkspaceService(_auditLogService);
-        _instructionService = new InstructionVersionService(_workspaceService);
+        _auditLogService = new AuditLogService(_auditLogRepo, new InMemoryAccountRepository());
+        _workspaceService = new WorkspaceService(_workspaceRepo, new InMemoryAccountGroupRepository(), _auditLogService);
+        _instructionService = new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService);
         _chatService = new AgentChatService(
             _sessionRepo, new NoOpToolRegistry(), _workspaceService, _instructionService,
-            new NoCredentialResolver(), new ThrowingClientFactory(), new HeuristicTokenBudgetEstimator(), new InMemoryLlmCredentialStore(), new LlmOptions());
+            new NoCredentialResolver(), new ThrowingClientFactory(), new HeuristicTokenBudgetEstimator(), new InMemoryLlmCredentialStore(),
+            _auditLogService, _workspaceRepo, new PromptDataBoundary(), new UnlimitedUsage(), new LlmOptions());
     }
 
     private async Task<(Guid workspaceId, Guid adminUserId)> CreateWorkspaceAsync()
@@ -122,11 +124,28 @@ public sealed class AgentChatServiceTests
     {
         public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
             => Task.FromResult<ResolvedLlmCredential?>(null);
+
+        public Task<ResolvedLlmCredential?> ResolveAsync(Guid workspaceId, Guid? projectId, Guid? userId, Guid? sessionId, LlmProvider? preferredProvider = null, CancellationToken ct = default)
+            => Task.FromResult<ResolvedLlmCredential?>(null);
     }
 
     private sealed class ThrowingClientFactory : IChatCompletionClientFactory
     {
-        public IChatCompletionClient Create(ResolvedLlmCredential credential)
+        public IChatCompletionClient Create(ResolvedLlmCredential credential, LlmCallContext? context = null)
             => throw new InvalidOperationException("No client should be created in these tests.");
     }
+
+    /// <summary>No budget configured, so every turn proceeds. #77's enforcement has its own tests.</summary>
+    private sealed class UnlimitedUsage : ILlmUsageService
+    {
+        public Task<LlmUsageSummary> GetWorkspaceUsageAsync(Guid workspaceId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmUsageSummary> GetAccountUsageAsync(Guid accountId, Guid requestingUserId, DateTimeOffset? from = null, DateTimeOffset? to = null, LlmUsageGrouping groupBy = LlmUsageGrouping.Model, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmBudgetVerdict> CheckBudgetAsync(Guid workspaceId, CancellationToken cancellationToken = default)
+            => Task.FromResult(LlmBudgetVerdict.Allowed);
+    }
+
 }

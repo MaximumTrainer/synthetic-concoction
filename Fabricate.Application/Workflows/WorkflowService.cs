@@ -3,21 +3,20 @@ using Fabricate.Domain.Models;
 
 namespace Fabricate.Application.Workflows;
 
-public sealed class WorkflowService(IAuditLogService auditLogService) : IWorkflowService
+public sealed class WorkflowService(
+    IWorkflowRepository workflowRepository,
+    IAuditLogService auditLogService) : IWorkflowService
 {
-    private readonly List<Workflow> _workflows = [];
-    private readonly List<WorkflowStep> _steps = [];
-    private readonly List<WorkflowRun> _runs = [];
-    private readonly List<WorkflowStepRun> _stepRuns = [];
-
     public async Task<Workflow> CreateAsync(CreateWorkflowCommand command, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
         var workflow = new Workflow(Guid.NewGuid(), command.WorkspaceId, command.Name, 1, WorkflowStatus.Active, DateTimeOffset.UtcNow);
-        _workflows.Add(workflow);
+        await workflowRepository.SaveAsync(workflow, cancellationToken).ConfigureAwait(false);
 
         foreach (var stepDef in command.Steps.OrderBy(s => s.StepOrder))
         {
-            _steps.Add(new WorkflowStep(Guid.NewGuid(), workflow.Id, stepDef.StepOrder, stepDef.StepType, stepDef.Configuration));
+            await workflowRepository.SaveStepAsync(
+                new WorkflowStep(Guid.NewGuid(), workflow.Id, stepDef.StepOrder, stepDef.StepType, stepDef.Configuration),
+                cancellationToken).ConfigureAwait(false);
         }
 
         await auditLogService.RecordAsync(new AuditEvent(
@@ -30,7 +29,7 @@ public sealed class WorkflowService(IAuditLogService auditLogService) : IWorkflo
 
     public async Task<WorkflowRun> RunAsync(Guid workflowId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        var workflow = _workflows.Find(w => w.Id == workflowId)
+        var workflow = await workflowRepository.GetByIdAsync(workflowId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Workflow '{workflowId}' not found.");
 
         if (workflow.Status == WorkflowStatus.Disabled)
@@ -39,30 +38,32 @@ public sealed class WorkflowService(IAuditLogService auditLogService) : IWorkflo
         }
 
         var run = new WorkflowRun(Guid.NewGuid(), workflowId, WorkflowRunStatus.Queued, DateTimeOffset.UtcNow);
-        _runs.Add(run);
+        await workflowRepository.SaveRunAsync(run, cancellationToken).ConfigureAwait(false);
 
-        var workflowSteps = _steps.Where(s => s.WorkflowId == workflowId).OrderBy(s => s.StepOrder).ToArray();
-        foreach (var step in workflowSteps)
+        var steps = await workflowRepository.ListStepsAsync(workflowId, cancellationToken).ConfigureAwait(false);
+        foreach (var step in steps)
         {
-            _stepRuns.Add(new WorkflowStepRun(Guid.NewGuid(), run.Id, step.Id, step.StepOrder, WorkflowRunStatus.Queued, 0));
+            await workflowRepository.SaveStepRunAsync(
+                new WorkflowStepRun(Guid.NewGuid(), run.Id, step.Id, step.StepOrder, WorkflowRunStatus.Queued, 0),
+                cancellationToken).ConfigureAwait(false);
         }
 
         return run;
     }
 
     public Task<WorkflowRun?> GetRunAsync(Guid runId, CancellationToken cancellationToken = default)
-        => Task.FromResult(_runs.Find(r => r.Id == runId));
+        => workflowRepository.GetRunAsync(runId, cancellationToken);
 
     public Task<IReadOnlyList<WorkflowStepRun>> GetStepRunsAsync(Guid runId, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<WorkflowStepRun>>(_stepRuns.Where(sr => sr.WorkflowRunId == runId).OrderBy(sr => sr.StepOrder).ToArray());
+        => workflowRepository.ListStepRunsAsync(runId, cancellationToken);
 
     public async Task<Workflow> DisableAsync(Guid workflowId, Guid requestingUserId, CancellationToken cancellationToken = default)
     {
-        var index = _workflows.FindIndex(w => w.Id == workflowId);
-        if (index < 0) throw new InvalidOperationException($"Workflow '{workflowId}' not found.");
+        var workflow = await workflowRepository.GetByIdAsync(workflowId, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"Workflow '{workflowId}' not found.");
 
-        var disabled = _workflows[index] with { Status = WorkflowStatus.Disabled };
-        _workflows[index] = disabled;
+        var disabled = workflow with { Status = WorkflowStatus.Disabled };
+        await workflowRepository.SaveAsync(disabled, cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), disabled.WorkspaceId, requestingUserId,

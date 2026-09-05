@@ -10,10 +10,10 @@ Fabricate currently supports **SQLite** and **PostgreSQL** for schema discovery 
 |----------|----------|--------|-------|
 | SQLite | - | ✅ Implemented | — |
 | PostgreSQL | - | ✅ Implemented | — |
-| Azure Cosmos DB | Azure | 🚧 Stub — design complete | [#53](https://github.com/MaximumTrainer/synthetic-fabricate/issues/53) |
-| MongoDB | Atlas / self-hosted | 🚧 Stub — design complete | [#54](https://github.com/MaximumTrainer/synthetic-fabricate/issues/54) |
-| AWS DynamoDB | AWS | 🚧 Stub — design complete | [#55](https://github.com/MaximumTrainer/synthetic-fabricate/issues/55) |
-| GCP Firestore | GCP | 🚧 Stub — design complete | [#56](https://github.com/MaximumTrainer/synthetic-fabricate/issues/56) |
+| Azure Cosmos DB | Azure | ✅ Implemented — verified against the emulator, opt-in | [#53](https://github.com/MaximumTrainer/synthetic-fabricate/issues/53) |
+| MongoDB | Atlas / self-hosted | ✅ Implemented — verified against `mongo:7` | [#54](https://github.com/MaximumTrainer/synthetic-fabricate/issues/54) |
+| AWS DynamoDB | AWS | ✅ Implemented — verified against DynamoDB Local | [#55](https://github.com/MaximumTrainer/synthetic-fabricate/issues/55) |
+| GCP Firestore | GCP | ✅ Implemented — verified against the emulator | [#56](https://github.com/MaximumTrainer/synthetic-fabricate/issues/56) |
 | GCP Spanner | GCP | 📋 Planned | — |
 | Azure Table Storage | Azure | 📋 Planned | — |
 
@@ -81,7 +81,7 @@ Fabricate.Infrastructure.Schema
   CosmosDbSchemaDiscoverer     ← adapter (stub → full)
   MongoDbSchemaDiscoverer      ← adapter (stub → full)
   DynamoDbSchemaDiscoverer     ← adapter (stub → full)
-  FirestoreSchemaDiscoverer    ← adapter (stub → full)
+  FirestoreSchemaDiscoverer    ← adapter
   NoSqlSchemaDiscovererFactory ← registered in DI
 ```
 
@@ -176,20 +176,31 @@ Each full adapter implementation should:
 
 ### Unit tests (no cloud dependency)
 
-- ✅ Stub adapters throw `NotSupportedException` with a descriptive message and the correct issue URL.
 - ✅ `NoSqlSchemaDiscovererFactory` resolves registered providers by name (case-insensitive).
 - ✅ `NoSqlSchemaDiscovererFactory` throws `NotSupportedException` for unknown providers.
 - ✅ `CollectionMetadata`, `FieldDescriptor`, `PartitionKeyDescriptor` value-object construction.
 
-### Integration tests (per-provider, cloud sandbox required)
+### Integration tests (per-provider, against a running instance)
 
-Each full adapter (#53–#56) must include integration tests that:
+Every provider runs against a real instance, and none of them needs a cloud account: MongoDB against `mongo:7`,
+DynamoDB against DynamoDB Local, Firestore against the Google Cloud CLI emulator, Cosmos DB against its own
+emulator (opt-in, via `FABRICATE_COSMOS_EMULATOR=1`, because the image is far heavier than the rest).
 
-- Connect to a real (dev/sandbox) instance of the provider.
-- Discover collections from a known fixture database.
-- Assert that expected fields and types are returned.
-- Assert that no raw document content is returned (only metadata).
-- Use environment-variable-gated skipping (`Skip.If(string.IsNullOrEmpty(connectionString))`).
+`NoSqlProfilerTests` covers MongoDB and `NoSqlEmulatorTests` covers the other three. All four are seeded with the
+same shaped documents — a field present on one document, explicitly null on a second, absent from a third; a
+nested object; an array — so a difference between providers is a real difference and not a difference of fixture.
+Each provider asserts the same properties:
+
+- Collections and their fields are discovered, with the provider's own key model (a DynamoDB hash key, a Cosmos
+  partition key, nothing for Firestore, which partitions internally).
+- Aggregate statistics are reported per field: type, non-null and null counts, distinct count, min and max.
+- A field absent from a document counts the same as one explicitly null.
+- **No raw document content appears in the snapshot.** Values planted in the fixture are asserted absent from the
+  serialised profile, and a string field's min/max is its length range rather than its content.
+
+**Absence is reported, never inferred.** Each suite carries a test that fails if an emulator did not start, and
+the coverage report names every provider as exercised, failed or not run. A suite that quietly does nothing is
+worse than one that is missing (#91).
 
 ### Security tests
 
@@ -202,7 +213,9 @@ Each full adapter (#53–#56) must include integration tests that:
 
 | Issue | Provider | Work |
 |-------|----------|------|
-| [#53](https://github.com/MaximumTrainer/synthetic-fabricate/issues/53) | Azure Cosmos DB | Full `CosmosDbSchemaDiscoverer` + profiler |
-| [#54](https://github.com/MaximumTrainer/synthetic-fabricate/issues/54) | MongoDB | Full `MongoDbSchemaDiscoverer` + profiler |
-| [#55](https://github.com/MaximumTrainer/synthetic-fabricate/issues/55) | AWS DynamoDB | Full `DynamoDbSchemaDiscoverer` + profiler |
-| [#56](https://github.com/MaximumTrainer/synthetic-fabricate/issues/56) | GCP Firestore | Full `FirestoreSchemaDiscoverer` + profiler |
+| [#53](https://github.com/MaximumTrainer/synthetic-fabricate/issues/53) | Azure Cosmos DB | ✅ `CosmosDbSchemaDiscoverer` + profiler |
+| [#54](https://github.com/MaximumTrainer/synthetic-fabricate/issues/54) | MongoDB | ✅ `MongoDbSchemaDiscoverer` + profiler |
+| [#55](https://github.com/MaximumTrainer/synthetic-fabricate/issues/55) | AWS DynamoDB | ✅ `DynamoDbSchemaDiscoverer` + profiler |
+| [#56](https://github.com/MaximumTrainer/synthetic-fabricate/issues/56) | GCP Firestore | ✅ `FirestoreSchemaDiscoverer` + profiler |
+| [#71](https://github.com/MaximumTrainer/synthetic-fabricate/issues/71) | all four | ✅ `INoSqlDataProfiler` implementations |
+| [#91](https://github.com/MaximumTrainer/synthetic-fabricate/issues/91) | all four | ✅ Verified against running instances rather than mocks |

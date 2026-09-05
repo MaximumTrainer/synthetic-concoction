@@ -12,19 +12,54 @@ public sealed class EfAuditLogRepository(FabricateDbContext db) : IAuditLogRepos
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<AuditEvent>> QueryAsync(Guid accountId, int skip, int take, string? actionFilter, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<AuditEvent>> QueryAsync(Guid accountId, AuditFilter filter, int skip, int take, CancellationToken cancellationToken = default)
+        => await Filtered(accountId, filter)
+            .OrderByDescending(e => e.OccurredAt)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+
+    public Task<int> CountAsync(Guid accountId, AuditFilter filter, CancellationToken cancellationToken = default)
+        => Filtered(accountId, filter).CountAsync(cancellationToken);
+
+    private IQueryable<AuditEvent> Filtered(Guid accountId, AuditFilter filter)
     {
-        var query = db.AuditEvents.Where(e => e.AccountId == accountId);
-        if (actionFilter is not null)
-            query = query.Where(e => e.Action.Contains(actionFilter));
-        return await query.OrderByDescending(e => e.OccurredAt).Skip(skip).Take(take).ToListAsync(cancellationToken);
+        var query = db.AuditEvents.AsNoTracking().Where(e => e.AccountId == accountId);
+
+        if (filter.Action is not null) query = query.Where(e => e.Action.Contains(filter.Action));
+        if (filter.ActionPrefix is not null) query = query.Where(e => e.Action.StartsWith(filter.ActionPrefix));
+        if (filter.ApiKeyId is not null) query = query.Where(e => e.ApiKeyId == filter.ApiKeyId);
+
+        return query;
     }
 
-    public async Task<int> CountAsync(Guid accountId, string? actionFilter, CancellationToken cancellationToken = default)
+    public IAsyncEnumerable<AuditEvent> StreamAsync(
+        Guid accountId,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        CancellationToken cancellationToken = default)
     {
-        var query = db.AuditEvents.Where(e => e.AccountId == accountId);
-        if (actionFilter is not null)
-            query = query.Where(e => e.Action.Contains(actionFilter));
-        return await query.CountAsync(cancellationToken);
+        var query = db.AuditEvents.AsNoTracking().Where(e => e.AccountId == accountId);
+        if (from is not null) query = query.Where(e => e.OccurredAt >= from);
+        if (to is not null) query = query.Where(e => e.OccurredAt <= to);
+
+        // AsAsyncEnumerable keeps the reader open rather than materialising the account's whole log, so an
+        // export of a large account streams straight from the database to the response body.
+        return query.OrderBy(e => e.OccurredAt).AsAsyncEnumerable();
+    }
+
+    public async Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken = default)
+    {
+        // ExecuteDeleteAsync issues one DELETE rather than loading entities to remove them. Both providers
+        // reject LIMIT directly on a DELETE, so the batch is expressed as a subquery over the primary key.
+        var doomed = db.AuditEvents
+            .Where(e => e.OccurredAt < cutoff)
+            .OrderBy(e => e.OccurredAt)
+            .Take(batchSize)
+            .Select(e => e.Id);
+
+        return await db.AuditEvents
+            .Where(e => doomed.Contains(e.Id))
+            .ExecuteDeleteAsync(cancellationToken);
     }
 }

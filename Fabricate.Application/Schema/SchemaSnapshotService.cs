@@ -4,94 +4,78 @@ using Fabricate.Domain.Models;
 namespace Fabricate.Application.Schema;
 
 /// <summary>
-/// In-memory implementation of schema/profile snapshot versioning.
-/// Stores immutable snapshots by ID for reproducible plan creation.
+/// Versioned, workspace-scoped schema snapshots (#75).
+///
+/// <para>
+/// Reads take the workspace as well as the id and return null for a snapshot belonging to another one. A stored
+/// schema is a description of a customer's database — table and column names, relationships — so a snapshot id
+/// must not be an existence oracle across tenants.
+/// </para>
 /// </summary>
-public sealed class SchemaSnapshotService : ISchemaSnapshotService
+public sealed class SchemaSnapshotService(ISchemaSnapshotRepository repository) : ISchemaSnapshotService
 {
-    private readonly Dictionary<Guid, SchemaSnapshot> _snapshots = new();
-    private readonly Dictionary<Guid, int> _versionCounters = new();
-
-    public Task<SchemaSnapshot> SaveSnapshotAsync(
+    public async Task<SchemaSnapshot> SaveSnapshotAsync(
         Guid workspaceId,
         DatabaseSchema schema,
         CancellationToken cancellationToken = default)
     {
-        _versionCounters.TryGetValue(workspaceId, out var currentVersion);
-        var nextVersion = currentVersion + 1;
-        _versionCounters[workspaceId] = nextVersion;
+        ArgumentNullException.ThrowIfNull(schema);
 
+        var version = await repository.MaxVersionAsync(workspaceId, cancellationToken).ConfigureAwait(false) + 1;
         var snapshot = new SchemaSnapshot(
             Id: Guid.NewGuid(),
             DatabaseName: schema.Name,
-            Version: nextVersion,
+            Version: version,
             CapturedAt: DateTimeOffset.UtcNow,
             Schema: schema,
             WorkspaceId: workspaceId);
 
-        _snapshots[snapshot.Id] = snapshot;
-        return Task.FromResult(snapshot);
+        await repository.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        return snapshot;
     }
 
-    public Task<SchemaSnapshot?> GetSnapshotAsync(Guid snapshotId, CancellationToken cancellationToken = default)
+    public async Task<SchemaSnapshot?> GetSnapshotAsync(Guid workspaceId, Guid snapshotId, CancellationToken cancellationToken = default)
     {
-        _snapshots.TryGetValue(snapshotId, out var snapshot);
-        return Task.FromResult(snapshot);
+        var snapshot = await repository.GetByIdAsync(snapshotId, cancellationToken).ConfigureAwait(false);
+        return snapshot?.WorkspaceId == workspaceId ? snapshot : null;
     }
 
-    public Task<IReadOnlyList<SchemaSnapshot>> ListSnapshotsAsync(
-        Guid workspaceId,
-        CancellationToken cancellationToken = default)
-    {
-        IReadOnlyList<SchemaSnapshot> results = _snapshots.Values
-            .Where(s => s.WorkspaceId == workspaceId)
-            .OrderByDescending(static s => s.Version)
-            .ToArray();
-        return Task.FromResult(results);
-    }
+    public Task<IReadOnlyList<SchemaSnapshot>> ListSnapshotsAsync(Guid workspaceId, CancellationToken cancellationToken = default)
+        => repository.ListByWorkspaceAsync(workspaceId, cancellationToken);
 
-    public Task<DatabaseSchema?> RestoreSchemaAsync(Guid snapshotId, CancellationToken cancellationToken = default)
-    {
-        _snapshots.TryGetValue(snapshotId, out var snapshot);
-        return Task.FromResult(snapshot?.Schema);
-    }
+    public async Task<DatabaseSchema?> RestoreSchemaAsync(Guid workspaceId, Guid snapshotId, CancellationToken cancellationToken = default)
+        => (await GetSnapshotAsync(workspaceId, snapshotId, cancellationToken).ConfigureAwait(false))?.Schema;
 }
 
-/// <summary>
-/// In-memory implementation of profile (aggregate statistics) snapshot versioning.
-/// </summary>
-public sealed class ProfileSnapshotService : IProfileSnapshotService
+/// <summary>Versioned, workspace-scoped profile (aggregate statistics) snapshots (#75).</summary>
+public sealed class ProfileSnapshotService(IProfileSnapshotRepository repository) : IProfileSnapshotService
 {
-    private readonly Dictionary<Guid, ProfileSnapshot> _profiles = new();
-    private readonly Dictionary<Guid, int> _versionCounters = new();
-
-    public Task<ProfileSnapshot> SaveProfileAsync(
+    public async Task<ProfileSnapshot> SaveProfileAsync(
         Guid workspaceId,
         ProfileSnapshot profile,
         CancellationToken cancellationToken = default)
     {
-        _versionCounters.TryGetValue(workspaceId, out var currentVersion);
-        var versioned = profile with { Id = Guid.NewGuid() };
-        _versionCounters[workspaceId] = currentVersion + 1;
-        _profiles[versioned.Id] = versioned;
-        return Task.FromResult(versioned);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var version = await repository.MaxVersionAsync(workspaceId, cancellationToken).ConfigureAwait(false) + 1;
+        var versioned = profile with
+        {
+            Id = Guid.NewGuid(),
+            Version = version,
+            WorkspaceId = workspaceId,
+            CapturedAt = profile.CapturedAt == default ? DateTimeOffset.UtcNow : profile.CapturedAt,
+        };
+
+        await repository.SaveAsync(versioned, cancellationToken).ConfigureAwait(false);
+        return versioned;
     }
 
-    public Task<ProfileSnapshot?> GetProfileAsync(Guid profileId, CancellationToken cancellationToken = default)
+    public async Task<ProfileSnapshot?> GetProfileAsync(Guid workspaceId, Guid profileId, CancellationToken cancellationToken = default)
     {
-        _profiles.TryGetValue(profileId, out var profile);
-        return Task.FromResult(profile);
+        var profile = await repository.GetByIdAsync(profileId, cancellationToken).ConfigureAwait(false);
+        return profile?.WorkspaceId == workspaceId ? profile : null;
     }
 
-    public Task<IReadOnlyList<ProfileSnapshot>> ListProfilesAsync(
-        Guid workspaceId,
-        CancellationToken cancellationToken = default)
-    {
-        // ProfileSnapshot doesn't carry WorkspaceId yet — return all ordered by capture time.
-        IReadOnlyList<ProfileSnapshot> results = _profiles.Values
-            .OrderByDescending(static p => p.CapturedAt)
-            .ToArray();
-        return Task.FromResult(results);
-    }
+    public Task<IReadOnlyList<ProfileSnapshot>> ListProfilesAsync(Guid workspaceId, CancellationToken cancellationToken = default)
+        => repository.ListByWorkspaceAsync(workspaceId, cancellationToken);
 }
-

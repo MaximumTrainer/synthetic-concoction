@@ -16,7 +16,7 @@ public sealed class ApiKeyServiceTests
 
     public ApiKeyServiceTests()
     {
-        var auditLogService = new AuditLogService(_auditLogRepo);
+        var auditLogService = new AuditLogService(_auditLogRepo, _accountRepo);
         _service = new ApiKeyService(_keyStore, _accountRepo);
     }
 

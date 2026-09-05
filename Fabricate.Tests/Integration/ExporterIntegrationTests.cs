@@ -115,7 +115,7 @@ public sealed class ExporterIntegrationTests : IDisposable
 
         var usersSql = await File.ReadAllTextAsync(sqlFiles.First(f => f.Contains("users")));
         usersSql.Should().Contain("INSERT INTO");
-        usersSql.Should().Contain("\"public.users\"");
+        usersSql.Should().Contain("\"public\".\"users\"", "each part of a qualified name is quoted separately so the SQL applies to a real database");
         usersSql.Should().Contain("'alice@example.com'");
         // Boolean TRUE/FALSE
         usersSql.Should().Contain("TRUE").And.Contain("FALSE");
