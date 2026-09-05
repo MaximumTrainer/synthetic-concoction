@@ -24,6 +24,8 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<LlmCredential> LlmCredentials => Set<LlmCredential>();
     public DbSet<WorkspaceLlmPolicy> WorkspaceLlmPolicies => Set<WorkspaceLlmPolicy>();
     public DbSet<LlmUsageRecord> LlmUsageRecords => Set<LlmUsageRecord>();
+    public DbSet<SchemaSnapshot> SchemaSnapshots => Set<SchemaSnapshot>();
+    public DbSet<ProfileSnapshot> ProfileSnapshots => Set<ProfileSnapshot>();
 
     // #65 — platform aggregates that previously lived in service fields
     public DbSet<Workspace> Workspaces => Set<Workspace>();
@@ -120,6 +122,30 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
 
             // Every query is "this workspace, this window" — usage rollups and the pre-turn budget check alike.
             e.HasIndex(u => new { u.WorkspaceId, u.OccurredAt });
+        });
+
+        // Snapshots (#75). The schema and the per-table profiles are stored as JSON: they are immutable payloads
+        // read back whole, never queried into, so modelling them as related tables would buy nothing.
+        modelBuilder.Entity<SchemaSnapshot>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.DatabaseName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Schema)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<DatabaseSchema>(v, (System.Text.Json.JsonSerializerOptions?)null)!);
+            e.HasIndex(x => new { x.WorkspaceId, x.Version });
+        });
+
+        modelBuilder.Entity<ProfileSnapshot>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.DatabaseName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Tables)
+                .HasConversion(
+                    v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                    v => System.Text.Json.JsonSerializer.Deserialize<List<TableProfile>>(v, (System.Text.Json.JsonSerializerOptions?)null)!);
+            e.HasIndex(x => new { x.WorkspaceId, x.Version });
         });
 
         // DatasetRun — store JSON collections as strings

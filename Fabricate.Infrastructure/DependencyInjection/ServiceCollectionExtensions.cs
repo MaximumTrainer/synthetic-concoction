@@ -107,8 +107,10 @@ public static class ServiceCollectionExtensions
         // #13 — schema/profile snapshots
         // Snapshot services still hold their own in-memory state (no repository yet — see #75), so they stay singleton:
         // scoping them would discard snapshots between requests. They consume nothing scoped, so no captive dependency.
-        services.AddSingleton<ISchemaSnapshotService, SchemaSnapshotService>();
-        services.AddSingleton<IProfileSnapshotService, ProfileSnapshotService>();
+        // Scoped, not singleton: these now read through repositories, which AddFabricatePersistence makes scoped.
+        // A singleton here would capture one DbContext for the process (#78).
+        services.AddScoped<ISchemaSnapshotService, SchemaSnapshotService>();
+        services.AddScoped<IProfileSnapshotService, ProfileSnapshotService>();
 
         // #43 — webhooks
         services.AddScoped<IWebhookService, WebhookService>();
@@ -170,6 +172,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IApiKeyStore, InMemoryApiKeyStore>();
         services.AddSingleton<ISecretProvider, EnvSecretProvider>();
         services.AddSingleton<IWebhookRepository, InMemoryWebhookRepository>();
+        services.AddSingleton<ISchemaSnapshotRepository, InMemorySchemaSnapshotRepository>();
+        services.AddSingleton<IProfileSnapshotRepository, InMemoryProfileSnapshotRepository>();
 
         // #65 — the remaining platform aggregates. Singletons here because the in-memory adapters *are* the store;
         // AddFabricatePersistence replaces every one with a scoped EF adapter.

@@ -52,17 +52,32 @@ public sealed class StreamingMemoryBudgetTests : IDisposable
         Seed: 5150);
 
     /// <summary>
-    /// Peak live heap observed during the run. The call site is deliberately synchronous: awaiting the run from
-    /// the test method hoists the completed task into the async state machine, which keeps the last run's objects
-    /// reachable and inflates any measurement taken afterwards.
+    /// Peak live heap attributable to the run: the highest mid-run sample minus a baseline taken immediately
+    /// before it. Measured as a delta because <see cref="GC.GetTotalMemory(bool)"/> reports the whole process,
+    /// and other suites' fixtures — database containers, EF contexts, the API host — are alive at the same time.
+    /// An absolute figure would charge this run for all of it.
+    ///
+    /// <para>
+    /// The call site is deliberately synchronous: awaiting the run from the test method hoists the completed task
+    /// into the async state machine, which keeps the run's objects reachable and inflates anything measured after.
+    /// </para>
     /// </summary>
     private long PeakRetainedDuring(int rows, string label, int samples = 6)
     {
+        var baseline = LiveBytes();
         var sampler = new SamplingExporter(new CsvExporter(), Math.Max(1, rows * 3 / samples));
         GenerationFixture.CreateOrchestrator(5150)
             .GenerateStreamingAsync(Request(rows), sampler, Path.Combine(_root, label))
             .GetAwaiter().GetResult();
-        return sampler.PeakRetainedBytes;
+
+        return Math.Max(0, sampler.PeakRetainedBytes - baseline);
+    }
+
+    private static long LiveBytes()
+    {
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true);
+        GC.WaitForPendingFinalizers();
+        return GC.GetTotalMemory(forceFullCollection: true);
     }
 
     [Fact]
@@ -71,8 +86,8 @@ public sealed class StreamingMemoryBudgetTests : IDisposable
         var peak = PeakRetainedDuring(RowsPerTable, "budget");
 
         peak.Should().BeLessThan(BudgetBytes,
-            $"a {RowsPerTable * 3:N0}-row streaming run must stay under {BudgetBytes / 1024 / 1024} MB; " +
-            $"measured {peak / 1024 / 1024} MB");
+            $"a {RowsPerTable * 3:N0}-row streaming run must add under {BudgetBytes / 1024 / 1024} MB to the " +
+            $"live heap; measured {peak / 1024 / 1024} MB");
 
         Directory.GetFiles(Path.Combine(_root, "budget"), "*.csv").Should().HaveCount(3);
     }

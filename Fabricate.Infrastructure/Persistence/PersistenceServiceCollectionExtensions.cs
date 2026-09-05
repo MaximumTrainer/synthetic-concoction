@@ -57,6 +57,8 @@ public static class PersistenceServiceCollectionExtensions
         services.AddScoped<IAccountGroupRepository, EfAccountGroupRepository>();
         services.AddScoped<IAllowedDomainRepository, EfAllowedDomainRepository>();
         services.AddScoped<IWebhookRepository, EfWebhookRepository>();
+        services.AddScoped<ISchemaSnapshotRepository, EfSchemaSnapshotRepository>();
+        services.AddScoped<IProfileSnapshotRepository, EfProfileSnapshotRepository>();
 
         return services;
     }

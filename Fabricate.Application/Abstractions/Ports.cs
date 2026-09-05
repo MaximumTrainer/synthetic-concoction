@@ -141,6 +141,12 @@ public interface IProfileSnapshotRepository
     Task SaveAsync(ProfileSnapshot snapshot, CancellationToken cancellationToken = default);
     Task<ProfileSnapshot?> GetLatestAsync(string databaseName, CancellationToken cancellationToken = default);
     Task<ProfileSnapshot?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>One workspace's snapshots, newest first (#75).</summary>
+    Task<IReadOnlyList<ProfileSnapshot>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>The highest version number issued in this workspace, or 0 when it has none.</summary>
+    Task<int> MaxVersionAsync(Guid workspaceId, CancellationToken cancellationToken = default);
 }
 
 public interface ISchemaSnapshotRepository
@@ -148,6 +154,12 @@ public interface ISchemaSnapshotRepository
     Task SaveAsync(SchemaSnapshot snapshot, CancellationToken cancellationToken = default);
     Task<SchemaSnapshot?> GetLatestAsync(string databaseName, CancellationToken cancellationToken = default);
     Task<SchemaSnapshot?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>One workspace's snapshots, newest first (#75).</summary>
+    Task<IReadOnlyList<SchemaSnapshot>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+
+    /// <summary>The highest version number issued in this workspace, or 0 when it has none.</summary>
+    Task<int> MaxVersionAsync(Guid workspaceId, CancellationToken cancellationToken = default);
 }
 
 public interface ISchemaReviewService
@@ -693,18 +705,22 @@ public interface IApiContractIngestionService
     Task<IReadOnlyList<GeneratedApiEndpoint>> IngestAsync(string openApiJson, Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Snapshot reads take the workspace so a snapshot belonging to another one is not found (#75) — a stored schema
+/// describes a customer's database, and its id must not be an existence oracle across tenants.
+/// </summary>
 public interface ISchemaSnapshotService
 {
     Task<SchemaSnapshot> SaveSnapshotAsync(Guid workspaceId, DatabaseSchema schema, CancellationToken cancellationToken = default);
-    Task<SchemaSnapshot?> GetSnapshotAsync(Guid snapshotId, CancellationToken cancellationToken = default);
+    Task<SchemaSnapshot?> GetSnapshotAsync(Guid workspaceId, Guid snapshotId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SchemaSnapshot>> ListSnapshotsAsync(Guid workspaceId, CancellationToken cancellationToken = default);
-    Task<DatabaseSchema?> RestoreSchemaAsync(Guid snapshotId, CancellationToken cancellationToken = default);
+    Task<DatabaseSchema?> RestoreSchemaAsync(Guid workspaceId, Guid snapshotId, CancellationToken cancellationToken = default);
 }
 
 public interface IProfileSnapshotService
 {
     Task<ProfileSnapshot> SaveProfileAsync(Guid workspaceId, ProfileSnapshot profile, CancellationToken cancellationToken = default);
-    Task<ProfileSnapshot?> GetProfileAsync(Guid profileId, CancellationToken cancellationToken = default);
+    Task<ProfileSnapshot?> GetProfileAsync(Guid workspaceId, Guid profileId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProfileSnapshot>> ListProfilesAsync(Guid workspaceId, CancellationToken cancellationToken = default);
 }
 

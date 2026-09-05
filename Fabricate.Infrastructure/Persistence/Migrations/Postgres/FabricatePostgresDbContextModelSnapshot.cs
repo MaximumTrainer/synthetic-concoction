@@ -587,6 +587,37 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
                     b.ToTable("LlmUsageRecords");
                 });
 
+            modelBuilder.Entity("Fabricate.Domain.Models.ProfileSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("CapturedAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("DatabaseName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Tables")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId", "Version");
+
+                    b.ToTable("ProfileSnapshots");
+                });
+
             modelBuilder.Entity("Fabricate.Domain.Models.Project", b =>
                 {
                     b.Property<Guid>("Id")
@@ -658,6 +689,37 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
                     b.HasIndex("ProjectId");
 
                     b.ToTable("ProjectDatabases");
+                });
+
+            modelBuilder.Entity("Fabricate.Domain.Models.SchemaSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("CapturedAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("DatabaseName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Schema")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId", "Version");
+
+                    b.ToTable("SchemaSnapshots");
                 });
 
             modelBuilder.Entity("Fabricate.Domain.Models.Skill", b =>
