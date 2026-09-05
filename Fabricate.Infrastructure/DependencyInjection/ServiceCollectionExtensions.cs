@@ -189,9 +189,19 @@ public static class ServiceCollectionExtensions
                 return new FileSystemArtifactStore(baseDir);
             }
 
-            return new S3ArtifactStore(
-                S3ClientFactory.Create(options, sp.GetRequiredService<ISecretProvider>()),
-                options.BucketName!);
+            var secrets = sp.GetRequiredService<ISecretProvider>();
+
+            if (options.IsAzureBlob)
+            {
+                return new AzureBlobArtifactStore(CloudStorageClientFactory.CreateAzureBlob(options, secrets));
+            }
+
+            if (options.IsGcs)
+            {
+                return new GcsArtifactStore(CloudStorageClientFactory.CreateGcs(options, secrets), options.BucketName!);
+            }
+
+            return new S3ArtifactStore(S3ClientFactory.Create(options, secrets), options.BucketName!);
         });
 
         services.AddSingleton<IDataProfiler>(sp =>

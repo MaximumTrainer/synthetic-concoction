@@ -30,17 +30,14 @@ public sealed class S3ArtifactStore(IAmazonS3 client, string bucketName) : IArti
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        var key = KeyFor(runId, name);
+        var key = ArtifactKey.For(runId, name);
 
         // The SDK needs a seekable stream to sign the payload — payload signing cannot be skipped over plain
         // HTTP, which is how MinIO and most self-hosted stores are reached — and a checksum has to be computed
         // over the whole body regardless. Hashing while spooling to a temp file keeps peak memory at one buffer
         // rather than one artifact; the streaming export can produce files far larger than it is safe to hold.
-        var spool = new TempFileStream();
-        try
+        await using var spool = await ArtifactUploadSpool.FillAsync(content, cancellationToken).ConfigureAwait(false);
         {
-            var (length, checksum) = await spool.FillAsync(content, cancellationToken).ConfigureAwait(false);
-
             var request = new PutObjectRequest
             {
                 BucketName = bucketName,
@@ -49,15 +46,11 @@ public sealed class S3ArtifactStore(IAmazonS3 client, string bucketName) : IArti
                 AutoCloseStream = false,
             };
 
-            request.Metadata.Add(ChecksumKey, checksum);
-            request.Metadata.Add(ContentLengthKey, length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            request.Metadata.Add(ChecksumKey, spool.Checksum);
+            request.Metadata.Add(ContentLengthKey, spool.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
             await client.PutObjectAsync(request, cancellationToken).ConfigureAwait(false);
             return key;
-        }
-        finally
-        {
-            await spool.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -91,7 +84,7 @@ public sealed class S3ArtifactStore(IAmazonS3 client, string bucketName) : IArti
 
     public async Task<IReadOnlyList<StoredArtifact>> ListAsync(string runId, CancellationToken cancellationToken = default)
     {
-        var prefix = Prefix(runId);
+        var prefix = ArtifactKey.Prefix(runId);
         var artifacts = new List<StoredArtifact>();
         string? continuationToken = null;
 
@@ -150,54 +143,4 @@ public sealed class S3ArtifactStore(IAmazonS3 client, string bucketName) : IArti
         return artifacts.Count;
     }
 
-    private static string Prefix(string runId) => $"runs/{Path.GetFileName(runId)}/";
-
-    private static string KeyFor(string runId, string name)
-    {
-        // Names carry an exporter directory (csv/main_users.csv). Segments are sanitised individually so the
-        // structure survives while traversal cannot escape the run's prefix.
-        var segments = name.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Select(Path.GetFileName)
-            .Where(seg => !string.IsNullOrEmpty(seg) && seg != "." && seg != "..")
-            .ToArray();
-
-        if (segments.Length == 0) throw new ArgumentException("Artifact name resolves to nothing.", nameof(name));
-
-        return Prefix(runId) + string.Join('/', segments);
-    }
-
-    /// <summary>
-    /// A temp file the upload body is spooled through, hashing as it goes. Deleted on dispose by the file
-    /// system itself (DeleteOnClose), so a crashed upload does not leave the artifact behind on disk.
-    /// </summary>
-    private sealed class TempFileStream : IAsyncDisposable
-    {
-        internal FileStream Stream { get; } = new(
-            Path.Combine(Path.GetTempPath(), $"fabricate-upload-{Guid.NewGuid():N}"),
-            FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920,
-            FileOptions.DeleteOnClose | FileOptions.Asynchronous);
-
-        internal async Task<(long Length, string Checksum)> FillAsync(Stream source, CancellationToken cancellationToken)
-        {
-            using var hasher = System.Security.Cryptography.SHA256.Create();
-            var buffer = new byte[81920];
-            long length = 0;
-
-            int read;
-            while ((read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                hasher.TransformBlock(buffer, 0, read, null, 0);
-                await Stream.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                length += read;
-            }
-
-            hasher.TransformFinalBlock([], 0, 0);
-            await Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            Stream.Position = 0;
-
-            return (length, Convert.ToHexStringLower(hasher.Hash!));
-        }
-
-        public ValueTask DisposeAsync() => Stream.DisposeAsync();
-    }
 }

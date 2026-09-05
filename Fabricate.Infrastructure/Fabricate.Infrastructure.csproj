@@ -15,6 +15,11 @@
     <PackageReference Include="AWSSDK.DynamoDBv2" Version="4.0.103.5" />
     <!-- S3-compatible artifact storage (#84): AWS S3, MinIO, Cloudflare R2 and Backblaze B2 all speak this API. -->
     <PackageReference Include="AWSSDK.S3" Version="4.0.6.6" />
+    <!-- Native object storage for the other two clouds (#90). S3 covers AWS, MinIO, R2 and B2; these two speak
+         their own APIs, and on Azure and GCP the native store is the one with ambient identity already in place. -->
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.24.1" />
+    <PackageReference Include="Azure.Identity" Version="1.17.0" />
+    <PackageReference Include="Google.Cloud.Storage.V1" Version="4.10.0" />
     <!-- Official Anthropic .NET SDK plus its cloud-platform clients. Anthropic.Bedrock requires AWSSDK.Core 4.x,
          which is why AWSSDK.DynamoDBv2 above sits on the 4.x line. -->
     <PackageReference Include="Anthropic" Version="12.45.0" />

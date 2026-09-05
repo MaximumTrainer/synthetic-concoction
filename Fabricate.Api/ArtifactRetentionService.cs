@@ -94,16 +94,13 @@ public sealed class ArtifactRetentionService(
 
     private static async Task<int> DeleteAsync(IArtifactStore store, Guid runId, CancellationToken cancellationToken)
     {
-        if (store is S3ArtifactStore s3)
+        return store switch
         {
-            return await s3.DeleteRunAsync(runId.ToString(), cancellationToken).ConfigureAwait(false);
-        }
-
-        if (store is FileSystemArtifactStore fileSystem)
-        {
-            return fileSystem.DeleteRun(runId.ToString());
-        }
-
-        return 0;
+            S3ArtifactStore s3 => await s3.DeleteRunAsync(runId.ToString(), cancellationToken).ConfigureAwait(false),
+            AzureBlobArtifactStore azure => await azure.DeleteRunAsync(runId.ToString(), cancellationToken).ConfigureAwait(false),
+            GcsArtifactStore gcs => await gcs.DeleteRunAsync(runId.ToString(), cancellationToken).ConfigureAwait(false),
+            FileSystemArtifactStore fileSystem => fileSystem.DeleteRun(runId.ToString()),
+            _ => 0,
+        };
     }
 }

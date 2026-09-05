@@ -27,6 +27,10 @@ Everything is configured by environment variables, so the same image runs unchan
 | `FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE` | for non-AWS | `true` for MinIO and most S3-compatible stores, which do not support virtual-host addressing. |
 | `FABRICATE_ARTIFACT_S3_ACCESS_KEY_SECRET` | no | Secret **name** holding the access key. Omit both key variables to use ambient cloud identity. |
 | `FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET` | no | Secret **name** holding the secret key. |
+| `FABRICATE_ARTIFACT_AZURE_ACCOUNT_URL` | with `azure-blob` | Storage account URL, e.g. `https://acme.blob.core.windows.net`. Used with managed identity. |
+| `FABRICATE_ARTIFACT_AZURE_CONNECTION_STRING_SECRET` | no | Secret **name** holding a connection string, for running outside Azure. Omit to use managed identity. |
+| `FABRICATE_ARTIFACT_GCS_PROJECT_ID` | no | GCP project id. Usually supplied by Application Default Credentials. |
+| `FABRICATE_ARTIFACT_GCS_CREDENTIALS_SECRET` | no | Secret **name** holding service-account key JSON, for running outside GCP. Omit to use ADC. |
 | `FABRICATE_ARTIFACT_RETENTION_DAYS` | no | Days to keep generated artifacts. Default `0` keeps them. |
 
 | `FABRICATE_AUDIT_RETENTION_DAYS` | no | Days of audit history to keep. **Default `0` keeps everything**, so an existing deployment never starts deleting on upgrade. Set it and a background sweep purges anything older; see [Audit retention](#audit-retention). |
@@ -107,8 +111,12 @@ That is right for local use and **wrong on every hosted target**: Fly machines a
 Container Apps revisions are immutable, ECS tasks restart. The files disappear and a completed run is left
 pointing at artifacts that no longer exist.
 
-Set `FABRICATE_ARTIFACT_STORE=s3` to use object storage instead. One adapter covers **AWS S3, MinIO, Cloudflare
-R2 and Backblaze B2**, because they all speak the same API:
+Set `FABRICATE_ARTIFACT_STORE` to use object storage instead. Three adapters cover the field: `s3` for **AWS S3,
+MinIO, Cloudflare R2 and Backblaze B2** (one API between them), `azure-blob` for **Azure Blob Storage**, and
+`gcs` for **Google Cloud Storage**.
+
+GCS and R2 both offer S3-compatible modes, so the `s3` adapter can reach them — but those modes need HMAC keys,
+which is exactly the stored credential the native adapters avoid. On Azure and GCP, prefer the native one.
 
 ```bash
 # AWS S3, using the task or instance role — no keys stored anywhere
@@ -123,13 +131,23 @@ FABRICATE_ARTIFACT_S3_ENDPOINT=https://s3.example.internal
 FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE=true
 FABRICATE_ARTIFACT_S3_ACCESS_KEY_SECRET=ARTIFACT_ACCESS_KEY
 FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET=ARTIFACT_SECRET_KEY
+
+# Azure Blob, using managed identity - no keys stored anywhere
+FABRICATE_ARTIFACT_STORE=azure-blob
+FABRICATE_ARTIFACT_BUCKET=fabricate-artifacts        # the container name
+FABRICATE_ARTIFACT_AZURE_ACCOUNT_URL=https://acme.blob.core.windows.net
+
+# Google Cloud Storage, using Application Default Credentials - likewise no keys
+FABRICATE_ARTIFACT_STORE=gcs
+FABRICATE_ARTIFACT_BUCKET=acme-fabricate-artifacts
 ```
 
-**Credentials.** Ambient cloud identity first — an IAM role on ECS or EKS, or the instance profile — because that
-means no key is stored anywhere at all. The two `*_SECRET` variables are the fallback for stores that have no
-ambient identity, and they hold the *name* of a secret, not its value, so artifact keys follow the same path as
-every other secret. Setting one without the other is refused at startup rather than falling through to ambient
-credentials and failing later with an unrelated permissions error.
+**Credentials.** Ambient cloud identity first on all three — an IAM role on ECS or EKS, managed identity on
+Azure, Application Default Credentials on GCP — because that means no key is stored anywhere at all. The
+`*_SECRET` variables are the fallback for running outside the cloud in question, and they hold the *name* of a
+secret, not its value, so artifact credentials follow the same path as every other secret. Supplying an S3 access
+key without its secret key is refused at startup rather than falling through to ambient credentials and failing
+later with an unrelated permissions error.
 
 The configuration is validated when the container is built, so a mistake stops the instance starting rather than
 being discovered by the first person to generate data.

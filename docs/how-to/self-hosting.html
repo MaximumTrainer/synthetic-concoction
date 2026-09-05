@@ -41,6 +41,10 @@
 <tr><td><code>FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE</code></td><td>for non-AWS</td><td><code>true</code> for MinIO and most S3-compatible stores, which do not support virtual-host addressing.</td></tr>
 <tr><td><code>FABRICATE_ARTIFACT_S3_ACCESS_KEY_SECRET</code></td><td>no</td><td>Secret <strong>name</strong> holding the access key. Omit both key variables to use ambient cloud identity.</td></tr>
 <tr><td><code>FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET</code></td><td>no</td><td>Secret <strong>name</strong> holding the secret key.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_AZURE_ACCOUNT_URL</code></td><td>with <code>azure-blob</code></td><td>Storage account URL, e.g. <code>https://acme.blob.core.windows.net</code>. Used with managed identity.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_AZURE_CONNECTION_STRING_SECRET</code></td><td>no</td><td>Secret <strong>name</strong> holding a connection string, for running outside Azure. Omit to use managed identity.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_GCS_PROJECT_ID</code></td><td>no</td><td>GCP project id. Usually supplied by Application Default Credentials.</td></tr>
+<tr><td><code>FABRICATE_ARTIFACT_GCS_CREDENTIALS_SECRET</code></td><td>no</td><td>Secret <strong>name</strong> holding service-account key JSON, for running outside GCP. Omit to use ADC.</td></tr>
 <tr><td><code>FABRICATE_ARTIFACT_RETENTION_DAYS</code></td><td>no</td><td>Days to keep generated artifacts. Default <code>0</code> keeps them.</td></tr>
 <tr><td><code>FABRICATE_AUDIT_RETENTION_DAYS</code></td><td>no</td><td>Days of audit history to keep. <strong>Default <code>0</code> keeps everything</strong>, so an existing deployment never starts deleting on upgrade. Set it and a background sweep purges anything older; see <a href="#audit-retention">Audit retention</a>.</td></tr>
 <tr><td><code>FABRICATE_AUDIT_SWEEP_MINUTES</code></td><td>no</td><td>How often the retention sweep runs (default 360, six hours). Only read when retention is enabled.</td></tr>
@@ -90,7 +94,8 @@ FABRICATE_AUDIT_SWEEP_MINUTES=360    # sweep every six hours (the default)</code
 <p>Project-bound credential → workspace default for the provider → the workspace's single active credential → the platform credential (only where <code>FABRICATE_LLM_PLATFORM_FALLBACK</code> allows) → none, in which case the chat returns a clear notice and the direct <code>/tool</code> commands still work.</p>
 <h3 id="artifact-storage">Artifact storage</h3>
 <p>Generated artifacts default to the local file system (<code>FABRICATE_ARTIFACTS_PATH</code>, else the OS temp directory). That is right for local use and <strong>wrong on every hosted target</strong>: Fly machines are replaced, Cloud Run and Container Apps revisions are immutable, ECS tasks restart. The files disappear and a completed run is left pointing at artifacts that no longer exist.</p>
-<p>Set <code>FABRICATE_ARTIFACT_STORE=s3</code> to use object storage instead. One adapter covers <strong>AWS S3, MinIO, Cloudflare R2 and Backblaze B2</strong>, because they all speak the same API:</p>
+<p>Set <code>FABRICATE_ARTIFACT_STORE</code> to use object storage instead. Three adapters cover the field: <code>s3</code> for <strong>AWS S3, MinIO, Cloudflare R2 and Backblaze B2</strong> (one API between them), <code>azure-blob</code> for <strong>Azure Blob Storage</strong>, and <code>gcs</code> for <strong>Google Cloud Storage</strong>.</p>
+<p>GCS and R2 both offer S3-compatible modes, so the <code>s3</code> adapter can reach them — but those modes need HMAC keys, which is exactly the stored credential the native adapters avoid. On Azure and GCP, prefer the native one.</p>
 <pre><code class="language-bash"># AWS S3, using the task or instance role — no keys stored anywhere
 FABRICATE_ARTIFACT_STORE=s3
 FABRICATE_ARTIFACT_BUCKET=acme-fabricate-artifacts
@@ -102,8 +107,17 @@ FABRICATE_ARTIFACT_BUCKET=fabricate-artifacts
 FABRICATE_ARTIFACT_S3_ENDPOINT=https://s3.example.internal
 FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE=true
 FABRICATE_ARTIFACT_S3_ACCESS_KEY_SECRET=ARTIFACT_ACCESS_KEY
-FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET=ARTIFACT_SECRET_KEY</code></pre>
-<p><strong>Credentials.</strong> Ambient cloud identity first — an IAM role on ECS or EKS, or the instance profile — because that means no key is stored anywhere at all. The two <code>*_SECRET</code> variables are the fallback for stores that have no ambient identity, and they hold the <em>name</em> of a secret, not its value, so artifact keys follow the same path as every other secret. Setting one without the other is refused at startup rather than falling through to ambient credentials and failing later with an unrelated permissions error.</p>
+FABRICATE_ARTIFACT_S3_SECRET_KEY_SECRET=ARTIFACT_SECRET_KEY
+
+# Azure Blob, using managed identity - no keys stored anywhere
+FABRICATE_ARTIFACT_STORE=azure-blob
+FABRICATE_ARTIFACT_BUCKET=fabricate-artifacts        # the container name
+FABRICATE_ARTIFACT_AZURE_ACCOUNT_URL=https://acme.blob.core.windows.net
+
+# Google Cloud Storage, using Application Default Credentials - likewise no keys
+FABRICATE_ARTIFACT_STORE=gcs
+FABRICATE_ARTIFACT_BUCKET=acme-fabricate-artifacts</code></pre>
+<p><strong>Credentials.</strong> Ambient cloud identity first on all three — an IAM role on ECS or EKS, managed identity on Azure, Application Default Credentials on GCP — because that means no key is stored anywhere at all. The <code>*_SECRET</code> variables are the fallback for running outside the cloud in question, and they hold the <em>name</em> of a secret, not its value, so artifact credentials follow the same path as every other secret. Supplying an S3 access key without its secret key is refused at startup rather than falling through to ambient credentials and failing later with an unrelated permissions error.</p>
 <p>The configuration is validated when the container is built, so a mistake stops the instance starting rather than being discovered by the first person to generate data.</p>
 <p><strong>Uploads and downloads stream.</strong> Size and SHA-256 are computed as the bytes pass through and stored as object metadata, which is what lets the run manifest be served without reading the blobs.</p>
 <p><strong>Retention.</strong> <code>FABRICATE_ARTIFACT_RETENTION_DAYS</code> defaults to <code>0</code>, keeping everything. A positive value starts a sweep that deletes the artifacts of runs older than the window; the run record keeps its checksums — still the record of what was produced — but reports an empty artifact manifest rather than paths that no longer resolve. Where your object store offers a lifecycle policy, configuring one on the bucket is cheaper than this sweep and does the same job; the sweep exists for stores that do not, and for operators who prefer the rule in one place.</p>
