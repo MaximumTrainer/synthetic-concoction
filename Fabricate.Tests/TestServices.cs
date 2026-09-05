@@ -36,6 +36,22 @@ public sealed class TestServices
     public AllowedDomainService CreateAllowedDomainService()
         => new(AllowedDomainRepository, AccountRepository, AuditLogService);
 
-    public ConnectionCatalogService CreateConnectionCatalogService()
-        => new(ConnectionRepository, WorkspaceService);
+    public ConnectionCatalogService CreateConnectionCatalogService(
+        ISecretCipher? cipher = null,
+        ISchemaProviderFactory? providerFactory = null)
+        => new(ConnectionRepository, WorkspaceService,
+            cipher ?? new PassthroughCipher(),
+            providerFactory ?? new Fabricate.Infrastructure.Schema.SchemaProviderFactory(),
+            AuditLogService);
+
+    /// <summary>
+    /// Stores the plaintext as-is. These tests are about scoping and redaction, not about the cipher — which has
+    /// its own tests — and a real one would need a Data Protection key ring.
+    /// </summary>
+    public sealed class PassthroughCipher : ISecretCipher
+    {
+        public (string CipherText, string KeyVersion) Encrypt(string plaintext) => (plaintext, "test");
+
+        public string Decrypt(string cipherText, string keyVersion) => cipherText;
+    }
 }

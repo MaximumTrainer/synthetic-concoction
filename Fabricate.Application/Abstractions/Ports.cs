@@ -481,10 +481,53 @@ public interface IWorkspaceService
 
 public interface IConnectionCatalogService
 {
-    Task<Connection> AddConnectionAsync(Guid workspaceId, string name, string provider, Guid requestingUserId, CancellationToken cancellationToken = default);
-    Task<Connection> UpdateStatusAsync(Guid connectionId, string status, Guid requestingUserId, Guid workspaceId, CancellationToken cancellationToken = default);
+    Task<ConnectionSummary> AddConnectionAsync(Guid workspaceId, string name, string provider, Guid requestingUserId, string? connectionString = null, CancellationToken cancellationToken = default);
+    Task<ConnectionSummary> UpdateStatusAsync(Guid connectionId, string status, Guid requestingUserId, Guid workspaceId, CancellationToken cancellationToken = default);
     Task RemoveConnectionAsync(Guid connectionId, Guid requestingUserId, Guid workspaceId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<Connection>> ListAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ConnectionSummary>> ListAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>One connection, or null when it belongs to another workspace (#69).</summary>
+    Task<ConnectionSummary?> GetAsync(Guid workspaceId, Guid connectionId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Replaces the stored connection string. The old one is not recoverable afterwards.</summary>
+    Task<ConnectionSummary> RotateAsync(Guid workspaceId, Guid connectionId, string connectionString, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Opens the connection and runs the provider's cheapest liveness check. Reports reachability without
+    /// disclosing the connection string, including in the failure message.
+    /// </summary>
+    Task<ConnectionValidationResult> ValidateAsync(Guid workspaceId, Guid connectionId, Guid requestingUserId, CancellationToken cancellationToken = default);
+}
+
+public sealed record ConnectionValidationResult(Guid ConnectionId, bool IsReachable, string Message, DateTimeOffset CheckedAt);
+
+/// <summary>
+/// Builds a schema provider for one workspace connection (#69). Discovery used a single instance-level provider,
+/// so every chat session introspected the operator's own database whatever workspace it belonged to.
+/// </summary>
+public interface ISchemaProviderFactory
+{
+    /// <summary>Providers this factory can build, for error messages and validation.</summary>
+    IReadOnlyList<string> SupportedProviders { get; }
+
+    ISchemaProvider Create(string provider, string connectionString);
+}
+
+/// <summary>
+/// Resolves the schema provider for one chat session. A delegate rather than an interface because the tool
+/// registry is a singleton and the resolver's dependencies are scoped: the composition root supplies this with a
+/// scope of its own, so nothing captures a DbContext for the process (#69, #78).
+/// </summary>
+public delegate Task<ISchemaProvider?> SessionSchemaProviderResolver(Guid sessionId, CancellationToken cancellationToken);
+
+/// <summary>Resolves the connection a chat session should introspect, decrypting it only for that call.</summary>
+public interface IConnectionResolver
+{
+    /// <summary>
+    /// The schema provider for a session's project database or workspace connection, or null when the workspace
+    /// has none — in which case the caller falls back to the instance-level provider.
+    /// </summary>
+    Task<ISchemaProvider?> ResolveAsync(Guid workspaceId, Guid? projectId, CancellationToken cancellationToken = default);
 }
 
 public interface ISecretProvider

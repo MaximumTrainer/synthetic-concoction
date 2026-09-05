@@ -80,6 +80,9 @@ public static class ServiceCollectionExtensions
         // #28 — workspaces
         services.AddScoped<IWorkspaceService, WorkspaceService>();
         services.AddScoped<IConnectionCatalogService, ConnectionCatalogService>();
+        // #69 — a schema provider per workspace connection, instead of the one instance-level provider.
+        services.TryAddSingleton<ISchemaProviderFactory, SchemaProviderFactory>();
+        services.AddScoped<IConnectionResolver, ConnectionResolver>();
         services.AddScoped<IInstructionVersionService, InstructionVersionService>();
 
         // #29 — projects
@@ -92,7 +95,21 @@ public static class ServiceCollectionExtensions
         {
             var registry = new ToolRegistry();
             // Built-in tools registered at composition time
-            registry.Register(new DiscoverSchemaTool(sp.GetRequiredService<ISchemaDiscoveryService>()));
+            // The resolver opens a scope per call: this registry is a singleton, and the connection repository
+            // and cipher are scoped once a database provider is configured (#69).
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+            registry.Register(new DiscoverSchemaTool(
+                sp.GetRequiredService<ISchemaDiscoveryService>(),
+                async (sessionId, ct) =>
+                {
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var sessions = scope.ServiceProvider.GetRequiredService<ISessionRepository>();
+                    var session = await sessions.GetByIdAsync(sessionId, ct).ConfigureAwait(false);
+                    if (session is null) return null;
+
+                    var connections = scope.ServiceProvider.GetRequiredService<IConnectionResolver>();
+                    return await connections.ResolveAsync(session.WorkspaceId, session.ProjectId, ct).ConfigureAwait(false);
+                }));
             registry.Register(new GenerateDataTool(sp.GetRequiredService<ISyntheticDataOrchestrator>()));
             return registry;
         });

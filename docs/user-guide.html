@@ -369,6 +369,32 @@ tables:
 <p>Top-level organisational unit. Members have roles: <code>Member</code> or <code>Owner</code>. Invitation flow: email + expiry token.</p>
 <h3>Workspaces</h3>
 <p>Scoped under Accounts. Contains connection catalog, secret references, agent instructions, and members with RBAC roles: Viewer / Editor / Admin.</p>
+<h3 id="connections">Connections</h3>
+<p>A workspace connection points at a database the agent may introspect. The connection string is sent <strong>once</strong>, at creation, encrypted with the same cipher as LLM credentials, and never returned.</p>
+<pre><code class="language-http">POST /workspaces/{workspaceId}/connections
+{
+  &quot;name&quot;: &quot;warehouse&quot;,
+  &quot;provider&quot;: &quot;postgres&quot;,
+  &quot;connectionString&quot;: &quot;Host=db.internal;Username=app;Password=…;Database=prod&quot;
+}</code></pre>
+<p>Supported providers: <code>sqlite</code>, <code>postgres</code> / <code>postgresql</code>. Anything else is a <code>400</code> naming the ones that work.</p>
+<table>
+  <tr><th>Route</th><th>Purpose</th></tr>
+  <tr><td><code>GET /workspaces/{id}/connections</code></td><td>Summaries: fingerprint, redacted target, status, last validation.</td></tr>
+  <tr><td><code>GET /workspaces/{id}/connections/{connectionId}</code></td><td>One summary. Another workspace's id is <code>404</code>, never <code>403</code>.</td></tr>
+  <tr><td><code>POST …/{connectionId}/rotate</code></td><td>Replaces the connection string. The old one is not recoverable.</td></tr>
+  <tr><td><code>POST …/{connectionId}/validate</code></td><td>Opens the connection and reads metadata; reports reachability.</td></tr>
+  <tr><td><code>DELETE …/{connectionId}</code></td><td>Removes it.</td></tr>
+</table>
+<p>Every read returns a <strong>summary</strong>, never the connection string. The <code>redacted</code> form keeps the host and database so you can recognise which connection you are looking at, and drops every credential. The <code>fingerprint</code> is a short hash — enough to tell two connections apart and to see that a rotation happened, without being reversible.</p>
+<p>Validation opens the connection and reads metadata rather than pinging, because a ping can succeed where the credentials cannot actually read. A failure message is scrubbed before it is returned or logged: database drivers quote the connection string back in their errors more often than not.</p>
+<h4 id="which-database-a-chat-session-sees">Which database a chat session sees</h4>
+<ol>
+<li>The session's <strong>project database</strong>, when the project has an external database naming a workspace connection.</li>
+<li>The workspace's <strong>single active connection</strong>, when it has exactly one.</li>
+<li>Otherwise the <strong>instance-level</strong> <code>SchemaProvider</code> configuration — which is what keeps the CLI and single-tenant self-hosting working exactly as before.</li>
+</ol>
+<p>With several connections and no project binding, discovery falls back to the configured default rather than guessing which of your databases to introspect.</p>
 <h3>Projects</h3>
 <p>Scoped under Workspaces. Holds database catalog entries and run history. Supports soft-delete (archive).</p>
 <h3>Governance</h3>

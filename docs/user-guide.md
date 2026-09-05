@@ -625,6 +625,64 @@ A **Workspace** is scoped under an Account. It contains:
 
 Members can be added or removed via `POST /workspaces/{id}/members` and `DELETE /workspaces/{id}/members/{userId}`.
 
+### Connections
+
+A workspace connection points at a database the agent may introspect. The connection string is sent **once**, at
+creation, encrypted with the same cipher as LLM credentials, and never returned.
+
+```http
+POST /workspaces/{workspaceId}/connections
+{
+  "name": "warehouse",
+  "provider": "postgres",
+  "connectionString": "Host=db.internal;Username=app;Password=…;Database=prod"
+}
+```
+
+Supported providers: `sqlite`, `postgres` / `postgresql`. Anything else is a `400` naming the ones that work.
+
+| Route | Purpose |
+|---|---|
+| `GET /workspaces/{id}/connections` | Summaries: fingerprint, redacted target, status, last validation. |
+| `GET /workspaces/{id}/connections/{connectionId}` | One summary. Another workspace's id is `404`, never `403`. |
+| `POST …/{connectionId}/rotate` | Replaces the connection string. The old one is not recoverable. |
+| `POST …/{connectionId}/validate` | Opens the connection and reads metadata; reports reachability. |
+| `DELETE …/{connectionId}` | Removes it. |
+
+Every read returns a **summary**, never the connection string:
+
+```json
+{
+  "id": "3fa85f64-…",
+  "name": "warehouse",
+  "provider": "postgres",
+  "status": "active",
+  "fingerprint": "9f3c2a1b4d5e",
+  "redacted": "Host=db.internal;Username=***;Password=***;Database=prod",
+  "hasSecret": true,
+  "lastValidatedAt": "2026-09-05T12:00:00Z",
+  "lastValidationError": null
+}
+```
+
+The `redacted` form keeps the host and database so you can recognise which connection you are looking at, and
+drops every credential. The `fingerprint` is a short hash — enough to tell two connections apart and to see that a
+rotation happened, without being reversible.
+
+Validation opens the connection and reads metadata rather than pinging, because a ping can succeed where the
+credentials cannot actually read. A failure message is scrubbed before it is returned or logged: database drivers
+quote the connection string back in their errors more often than not.
+
+#### Which database a chat session sees
+
+1. The session's **project database**, when the project has an external database naming a workspace connection.
+2. The workspace's **single active connection**, when it has exactly one.
+3. Otherwise the **instance-level** `SchemaProvider` configuration — which is what keeps the CLI and single-tenant
+   self-hosting working exactly as before.
+
+With several connections and no project binding, discovery falls back to the configured default rather than
+guessing which of your databases to introspect.
+
 ### Projects
 
 A **Project** is scoped under a Workspace. It holds:

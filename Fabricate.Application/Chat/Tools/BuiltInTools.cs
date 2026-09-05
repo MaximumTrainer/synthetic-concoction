@@ -6,10 +6,19 @@ using Fabricate.Domain.Models;
 namespace Fabricate.Application.Chat.Tools;
 
 /// <summary>
-/// Built-in tool that discovers the schema from the active workspace connection
-/// and returns a compact JSON summary suitable for an agent response.
+/// Built-in tool that discovers the schema from the session's own connection and returns a compact JSON summary
+/// suitable for an agent response.
+///
+/// <para>
+/// Until #69 this always used the instance-level provider, so a session in any workspace introspected the
+/// operator's own database. It now resolves the session's project database or workspace connection first, and
+/// falls back to the configured provider only when the workspace has none — which is what keeps single-tenant
+/// self-hosting and the CLI working unchanged.
+/// </para>
 /// </summary>
-public sealed class DiscoverSchemaTool(ISchemaDiscoveryService discovery) : ITool
+public sealed class DiscoverSchemaTool(
+    ISchemaDiscoveryService discovery,
+    SessionSchemaProviderResolver? resolveForSession = null) : ITool
 {
     public string Name => "discover_schema";
     public string Description => "Discover the database schema (tables, columns, FK relationships) for the active connection.";
@@ -20,7 +29,13 @@ public sealed class DiscoverSchemaTool(ISchemaDiscoveryService discovery) : IToo
         Guid userId,
         CancellationToken cancellationToken = default)
     {
-        var schema = await discovery.DiscoverAsync(cancellationToken).ConfigureAwait(false);
+        var provider = resolveForSession is null
+            ? null
+            : await resolveForSession(sessionId, cancellationToken).ConfigureAwait(false);
+
+        var schema = provider is null
+            ? await discovery.DiscoverAsync(cancellationToken).ConfigureAwait(false)
+            : await provider.DiscoverAsync(cancellationToken).ConfigureAwait(false);
 
         var summary = new
         {
