@@ -800,6 +800,59 @@ public interface IApiContractIngestionService
     Task<IReadOnlyList<GeneratedApiEndpoint>> IngestAsync(string openApiJson, Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
 }
 
+// ── #70: serving generated endpoints from ingested contracts ─────────────────
+
+public sealed record IngestContractCommand(Guid WorkspaceId, string Name, string DocumentJson);
+
+/// <param name="ClearBinding">Unbinds the endpoint. Distinguishes "leave alone" from "unbind" for nullable fields.</param>
+public sealed record BindEndpointCommand(
+    Guid? ArtifactRunId = null,
+    string? BoundTable = null,
+    bool? IsActive = null,
+    bool ClearBinding = false);
+
+public interface IApiContractRepository
+{
+    Task<ApiContract> SaveAsync(ApiContract contract, CancellationToken cancellationToken = default);
+    Task<ApiContract?> GetByIdAsync(Guid contractId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ApiContract>> ListByWorkspaceAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+
+    Task<GeneratedApiEndpoint> SaveEndpointAsync(GeneratedApiEndpoint endpoint, CancellationToken cancellationToken = default);
+    Task<GeneratedApiEndpoint?> GetEndpointAsync(Guid endpointId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<GeneratedApiEndpoint>> ListEndpointsAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Ingests contracts, binds their endpoints to generated data, and serves them (#70). The ingestion service
+/// parsed a document into endpoints that nothing stored and nothing served.
+/// </summary>
+public interface IGeneratedApiService
+{
+    Task<ApiContract> IngestAsync(IngestContractCommand command, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ApiContract>> ListContractsAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<GeneratedApiEndpoint>> ListEndpointsAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Binds an endpoint to a run and table, or toggles it. Validates the bound rows against the contract's
+    /// response schema and records any mismatch as a diagnostic rather than letting it surface at request time.
+    /// </summary>
+    /// <remarks>
+    /// Named BindEndpointAsync, not BindAsync: minimal APIs treat any parameter type declaring a <c>BindAsync</c>
+    /// method as a custom model binder, so the name makes the whole service unusable as a route parameter.
+    /// </remarks>
+    Task<GeneratedApiEndpoint?> BindEndpointAsync(Guid workspaceId, Guid endpointId, BindEndpointCommand command, Guid requestingUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Serves a request against the workspace's active endpoints. Null means no endpoint matched, is bound, or is
+    /// servable — all of which are a 404 to the caller.
+    /// </summary>
+    Task<GeneratedApiResponse?> ServeAsync(Guid workspaceId, string method, string path, Guid requestingUserId, CancellationToken cancellationToken = default);
+}
+
+public sealed record GeneratedApiResponse(string Json, string OperationId, Guid EndpointId, int StatusCode = 200);
+
 /// <summary>
 /// Snapshot reads take the workspace so a snapshot belonging to another one is not found (#75) — a stored schema
 /// describes a customer's database, and its id must not be an existence oracle across tenants.

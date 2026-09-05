@@ -36,6 +36,7 @@
     <li><a href="#platform">Multi-Tenant Platform</a></li>
     <li><a href="#chat">Agent Chat</a></li>
     <li><a href="#workflows">Workflows &amp; Skills</a></li>
+    <li><a href="#generated-apis">Generated APIs</a></li>
     <li><a href="#apikeys">API Keys</a></li>
     <li><a href="#selfref">Self-Referencing FK Backfill</a></li>
   </ol>
@@ -519,6 +520,23 @@ GET /accounts/{accountId}/llm-usage?groupBy=credential</code></pre>
 <p>Workflows define multi-step automation sequences triggered on demand via <code>POST /workflows/{id}/run</code>.</p>
 <p>The custom skill registry supports OpenAPI contract ingestion — import an external API spec to expose its operations as callable workflow steps.</p>
 
+<h2 id="generated-apis">Generated APIs</h2>
+<p>Ingest an OpenAPI contract, bind its operations to a generated dataset, and serve them — a mock API whose payloads come from your own generated data and match the contract you gave it.</p>
+<h3 id="post-api-contracts">POST /workspaces/{workspaceId}/api-contracts</h3>
+<p>Requires the workspace <strong>Editor</strong> role. Stores the contract and one endpoint per operation. A document that will not parse is a <code>400</code> carrying the parser's own reasons.</p>
+<h3 id="get-api-endpoints">GET /workspaces/{workspaceId}/api-contracts and /api-endpoints</h3>
+<p>Each endpoint carries its <code>path</code>, <code>method</code>, <code>operationId</code>, the <code>responseKind</code> derived from the contract (<code>Collection</code> for an array response, <code>Item</code> for a single object on a path ending in a parameter), its binding, and <code>isServable</code>.</p>
+<h3 id="patch-api-endpoint">PATCH /workspaces/{workspaceId}/api-endpoints/{endpointId}</h3>
+<pre><code class="language-json">{ &quot;artifactRunId&quot;: &quot;3fa85f64-...&quot;, &quot;boundTable&quot;: &quot;main.customers&quot; }</code></pre>
+<p>Binds the endpoint to a table in a completed run, exported with the <code>json</code> format. Send <code>isActive</code> to toggle it, or <code>clearBinding: true</code> to unbind.</p>
+<p>The bound rows are checked against the contract's response schema <strong>at bind time</strong>, and any mismatch is stored on the endpoint as <code>diagnostics</code> — finding out when a client rejects the payload is the worst moment to learn it. An endpoint with a diagnostic is stored but not served, so a bad binding is visible rather than fatal.</p>
+<p>The check is deliberately narrow: required properties present, and declared primitive types not contradicted. That catches the mistake it exists for — binding to the wrong table — without a full JSON Schema implementation whose failures would be harder to act on than the mismatch.</p>
+<h3 id="get-mock">GET /workspaces/{workspaceId}/mock/{path}</h3>
+<pre><code class="language-http">GET /workspaces/{workspaceId}/mock/customers
+GET /workspaces/{workspaceId}/mock/customers/42</code></pre>
+<p>Matches the path against the contract's templates, preferring literal segments over parameters, and returns the bound rows: an array for a <code>Collection</code> operation, one row for an <code>Item</code> operation matched on the trailing path parameter. The <code>X-Fabricate-Operation</code> response header names the operation that answered.</p>
+<p>Everything that is not a live, bound, servable endpoint is a <code>404</code>: an unbound endpoint, an inactive one, an endpoint with diagnostics, a path outside the contract, a method the contract does not declare for that path, and an item id with no matching row.</p>
+<p>Mock routes use the same API-key authentication and rate limiting as the rest of the API, and each call is audited like any other request — a mock endpoint is still this instance serving a tenant's data.</p>
 <h2 id="apikeys">13. API Keys</h2>
 <p>All API keys use the <code>cnc_</code> prefix. The plaintext secret is shown once at creation. The platform stores only the SHA-256 hash.</p>
 <table>

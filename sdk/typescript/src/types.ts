@@ -69,6 +69,44 @@ export interface DatasetRun {
   workspaceId: string | null;
 }
 
+export type GeneratedResponseKind = "Collection" | "Item";
+
+export interface ApiContract {
+  id: string;
+  workspaceId: string;
+  name: string;
+  version: string;
+  documentJson: string;
+  createdByUserId: string;
+  createdAt: string;
+}
+
+export interface GeneratedApiEndpoint {
+  id: string;
+  workspaceId: string;
+  path: string;
+  method: string;
+  operationId: string;
+  contractId: string | null;
+  artifactRunId: string | null;
+  boundTable: string | null;
+  responseKind: GeneratedResponseKind;
+  isActive: boolean;
+  /** Why the endpoint cannot be served, when it cannot — a contract mismatch, or a missing artifact. */
+  diagnostics: string | null;
+  /** Active, bound to a run and table, and free of diagnostics. */
+  isServable: boolean;
+  createdAt: string;
+}
+
+export interface BindEndpointRequest {
+  artifactRunId?: string;
+  boundTable?: string;
+  isActive?: boolean;
+  /** Unbinds the endpoint. Distinguishes "leave alone" from "unbind". */
+  clearBinding?: boolean;
+}
+
 export interface RunArtifact {
   name: string;
   sizeBytes: number;

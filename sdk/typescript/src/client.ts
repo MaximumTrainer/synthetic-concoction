@@ -3,6 +3,9 @@ import type {
   AccountMembership,
   ApiKey,
   ApiKeyCreateResult,
+  ApiContract,
+  BindEndpointRequest,
+  GeneratedApiEndpoint,
   ChatMessage,
   ChatMode,
   ChatSession,
@@ -424,6 +427,43 @@ export class FabricateClient {
       `/workspaces/${workspaceId}/llm-credentials/policy`,
       request
     );
+  }
+
+  // ─── Generated APIs from OpenAPI contracts ────────────────────────────────────
+
+  /** Ingests an OpenAPI document and stores the endpoints it declares. Requires the Editor role. */
+  async ingestApiContract(workspaceId: string, name: string, document: string): Promise<ApiContract> {
+    return this.post<ApiContract>(`/workspaces/${workspaceId}/api-contracts`, { name, document });
+  }
+
+  async listApiContracts(workspaceId: string): Promise<ApiContract[]> {
+    return this.get<ApiContract[]>(`/workspaces/${workspaceId}/api-contracts`);
+  }
+
+  async listApiEndpoints(workspaceId: string): Promise<GeneratedApiEndpoint[]> {
+    return this.get<GeneratedApiEndpoint[]>(`/workspaces/${workspaceId}/api-endpoints`);
+  }
+
+  /**
+   * Binds an endpoint to a run's table, or toggles it. The response carries `diagnostics` when the bound table
+   * does not satisfy the contract — the endpoint is stored either way, and is not served while a diagnostic
+   * stands.
+   */
+  async bindApiEndpoint(
+    workspaceId: string,
+    endpointId: string,
+    request: BindEndpointRequest
+  ): Promise<GeneratedApiEndpoint> {
+    return this.patch<GeneratedApiEndpoint>(`/workspaces/${workspaceId}/api-endpoints/${endpointId}`, request);
+  }
+
+  /**
+   * Calls a generated endpoint. `path` is the contract path — `/customers/42` — and the response is whatever the
+   * contract declares. Unbound, inactive and unknown paths are all a 404.
+   */
+  async callGeneratedApi<T = unknown>(workspaceId: string, path: string, method = "GET"): Promise<T> {
+    const trimmed = path.replace(/^\//, "");
+    return this.send<T>(method, `/workspaces/${workspaceId}/mock/${trimmed}`, undefined);
   }
 
   // ─── LLM usage ────────────────────────────────────────────────────────────────

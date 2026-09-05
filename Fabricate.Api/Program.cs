@@ -166,6 +166,7 @@ app.MapWebhookRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolic
 app.MapAuditRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
 app.MapLlmUsageRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
 app.MapSnapshotRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
+app.MapGeneratedApiRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
 app.MapAccountLlmUsageRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
 
 app.Run();

@@ -61,7 +61,28 @@ public sealed record Skill(
     bool IsEnabled,
     DateTimeOffset CreatedAt);
 
-/// <summary>An API endpoint generated from an OpenAPI contract, backed by a generated dataset artifact.</summary>
+/// <summary>Whether an operation returns a collection or a single item, decided from its path and schema.</summary>
+public enum GeneratedResponseKind
+{
+    /// <summary>A list operation: the bound table's rows, as an array.</summary>
+    Collection = 0,
+
+    /// <summary>An item operation: one row, matched on the trailing path parameter.</summary>
+    Item,
+}
+
+/// <summary>
+/// An API endpoint generated from an OpenAPI contract, backed by a generated dataset artifact (#70).
+/// </summary>
+/// <param name="BoundTable">The qualified table in the run whose rows this endpoint serves, once bound.</param>
+/// <param name="ResponseSchemaJson">
+/// The operation's 2xx response schema, kept so a payload can be checked against the contract before it is
+/// served rather than after someone's client rejects it.
+/// </param>
+/// <param name="Diagnostics">
+/// Why the endpoint cannot be served, when it cannot. A schema mismatch belongs here rather than in a 500: the
+/// endpoint is misconfigured, which is a fact about the endpoint, not a failure of the request.
+/// </param>
 public sealed record GeneratedApiEndpoint(
     Guid Id,
     Guid WorkspaceId,
@@ -70,4 +91,26 @@ public sealed record GeneratedApiEndpoint(
     string OperationId,
     Guid? ArtifactRunId,
     bool IsActive,
+    DateTimeOffset CreatedAt,
+    Guid? ContractId = null,
+    string? BoundTable = null,
+    GeneratedResponseKind ResponseKind = GeneratedResponseKind.Collection,
+    string? ResponseSchemaJson = null,
+    string? Diagnostics = null)
+{
+    /// <summary>An endpoint is servable only when active, bound to a run and table, and free of diagnostics.</summary>
+    public bool IsServable => IsActive
+        && ArtifactRunId is not null
+        && !string.IsNullOrWhiteSpace(BoundTable)
+        && string.IsNullOrWhiteSpace(Diagnostics);
+}
+
+/// <summary>An ingested OpenAPI contract. The document is kept so endpoints can be re-derived from it.</summary>
+public sealed record ApiContract(
+    Guid Id,
+    Guid WorkspaceId,
+    string Name,
+    string Version,
+    string DocumentJson,
+    Guid CreatedByUserId,
     DateTimeOffset CreatedAt);

@@ -80,6 +80,8 @@ public static class ServiceCollectionExtensions
         // #28 — workspaces
         services.AddScoped<IWorkspaceService, WorkspaceService>();
         services.AddScoped<IConnectionCatalogService, ConnectionCatalogService>();
+        // #70 — serving endpoints derived from ingested OpenAPI contracts.
+        services.AddScoped<IGeneratedApiService, GeneratedApiService>();
         // #69 — a schema provider per workspace connection, instead of the one instance-level provider.
         services.TryAddSingleton<ISchemaProviderFactory, SchemaProviderFactory>();
         services.AddScoped<IConnectionResolver, ConnectionResolver>();
@@ -216,6 +218,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IWebhookRepository, InMemoryWebhookRepository>();
         services.AddSingleton<ISchemaSnapshotRepository, InMemorySchemaSnapshotRepository>();
         services.AddSingleton<IProfileSnapshotRepository, InMemoryProfileSnapshotRepository>();
+        services.AddSingleton<IApiContractRepository, InMemoryApiContractRepository>();
 
         // #65 — the remaining platform aggregates. Singletons here because the in-memory adapters *are* the store;
         // AddFabricatePersistence replaces every one with a scoped EF adapter.

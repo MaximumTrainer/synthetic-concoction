@@ -964,6 +964,64 @@ Fabricate has a custom skill registry. Skills are callable units registered in t
 
 ---
 
+## Generated APIs
+
+Ingest an OpenAPI contract, bind its operations to a generated dataset, and serve them — a mock API whose payloads
+come from your own generated data and match the contract you gave it.
+
+### POST /workspaces/{workspaceId}/api-contracts
+
+```json
+{ "name": "customers", "document": "{ \"openapi\": \"3.0.0\", ... }" }
+```
+
+Requires the workspace **Editor** role. Stores the contract and one endpoint per operation. A document that will
+not parse is a `400` carrying the parser's own reasons.
+
+### GET /workspaces/{workspaceId}/api-contracts
+### GET /workspaces/{workspaceId}/api-endpoints
+
+Each endpoint carries its `path`, `method`, `operationId`, the `responseKind` derived from the contract
+(`Collection` for an array response, `Item` for a single object on a path ending in a parameter), its binding, and
+`isServable`.
+
+### PATCH /workspaces/{workspaceId}/api-endpoints/{endpointId}
+
+```json
+{ "artifactRunId": "3fa85f64-...", "boundTable": "main.customers" }
+```
+
+Binds the endpoint to a table in a completed run, exported with the `json` format. Send `isActive` to toggle it,
+or `clearBinding: true` to unbind.
+
+The bound rows are checked against the contract's response schema **at bind time**, and any mismatch is stored on
+the endpoint as `diagnostics` — finding out when a client rejects the payload is the worst moment to learn it. An
+endpoint with a diagnostic is stored but not served, so a bad binding is visible rather than fatal.
+
+The check is deliberately narrow: required properties present, and declared primitive types not contradicted. That
+catches the mistake it exists for — binding to the wrong table — without a full JSON Schema implementation whose
+failures would be harder to act on than the mismatch.
+
+### GET /workspaces/{workspaceId}/mock/{path}
+
+```http
+GET /workspaces/{workspaceId}/mock/customers
+GET /workspaces/{workspaceId}/mock/customers/42
+```
+
+Matches the path against the contract's templates, preferring literal segments over parameters, and returns the
+bound rows: an array for a `Collection` operation, one row for an `Item` operation matched on the trailing path
+parameter. The `X-Fabricate-Operation` response header names the operation that answered.
+
+Everything that is not a live, bound, servable endpoint is a `404`: an unbound endpoint, an inactive one, an
+endpoint with diagnostics, a path outside the contract, a method the contract does not declare for that path, and
+an item id with no matching row.
+
+Mock routes use the same API-key authentication and rate limiting as the rest of the API, and each call is audited
+like any other request — a mock endpoint is still this instance serving a tenant's data.
+
+---
+
 ## API Keys
 
 API keys authenticate requests to the REST API.

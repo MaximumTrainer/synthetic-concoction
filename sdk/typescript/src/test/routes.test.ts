@@ -263,3 +263,23 @@ test("LLM usage methods hit the workspace and account rollups", async () => {
     "GET /accounts/a1/llm-usage?groupBy=Credential",
   ]);
 });
+
+test("generated API methods hit the contract, endpoint and mock routes", async () => {
+  const { client, calls, trace } = recorder(() => ({ id: "e1" }));
+
+  await client.ingestApiContract("ws1", "customers", "{}");
+  await client.listApiContracts("ws1");
+  await client.listApiEndpoints("ws1");
+  await client.bindApiEndpoint("ws1", "e1", { artifactRunId: "r1", boundTable: "main.customers" });
+  await client.callGeneratedApi("ws1", "/customers/42");
+
+  assert.deepEqual(trace(), [
+    "POST /workspaces/ws1/api-contracts",
+    "GET /workspaces/ws1/api-contracts",
+    "GET /workspaces/ws1/api-endpoints",
+    "PATCH /workspaces/ws1/api-endpoints/e1",
+    "GET /workspaces/ws1/mock/customers/42",
+  ]);
+  assert.deepEqual(calls[0].body, { name: "customers", document: "{}" });
+  assert.deepEqual(calls[3].body, { artifactRunId: "r1", boundTable: "main.customers" });
+});

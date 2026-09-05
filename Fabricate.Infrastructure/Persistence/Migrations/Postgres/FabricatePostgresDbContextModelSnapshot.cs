@@ -104,6 +104,42 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
                     b.ToTable("AllowedDomains");
                 });
 
+            modelBuilder.Entity("Fabricate.Domain.Models.ApiContract", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DocumentJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId");
+
+                    b.ToTable("ApiContracts");
+                });
+
             modelBuilder.Entity("Fabricate.Domain.Models.ApiKey", b =>
                 {
                     b.Property<Guid>("Id")
@@ -372,6 +408,62 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
                     b.HasKey("Id");
 
                     b.ToTable("DatasetRuns");
+                });
+
+            modelBuilder.Entity("Fabricate.Domain.Models.GeneratedApiEndpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ArtifactRunId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BoundTable")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<Guid?>("ContractId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Diagnostics")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("ResponseKind")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ResponseSchemaJson")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId");
+
+                    b.ToTable("GeneratedApiEndpoints");
                 });
 
             modelBuilder.Entity("Fabricate.Domain.Models.GroupMembership", b =>

@@ -26,6 +26,8 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
     public DbSet<LlmUsageRecord> LlmUsageRecords => Set<LlmUsageRecord>();
     public DbSet<SchemaSnapshot> SchemaSnapshots => Set<SchemaSnapshot>();
     public DbSet<ProfileSnapshot> ProfileSnapshots => Set<ProfileSnapshot>();
+    public DbSet<ApiContract> ApiContracts => Set<ApiContract>();
+    public DbSet<GeneratedApiEndpoint> GeneratedApiEndpoints => Set<GeneratedApiEndpoint>();
 
     // #65 — platform aggregates that previously lived in service fields
     public DbSet<Workspace> Workspaces => Set<Workspace>();
@@ -146,6 +148,29 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
                     v => System.Text.Json.JsonSerializer.Deserialize<List<TableProfile>>(v, (System.Text.Json.JsonSerializerOptions?)null)!);
             e.HasIndex(x => new { x.WorkspaceId, x.Version });
+        });
+
+        // Ingested contracts and the endpoints derived from them (#70).
+        modelBuilder.Entity<ApiContract>(e =>
+        {
+            e.HasKey(c => c.Id);
+            e.Property(c => c.Name).IsRequired().HasMaxLength(200);
+            e.Property(c => c.Version).IsRequired().HasMaxLength(50);
+            e.HasIndex(c => c.WorkspaceId);
+        });
+
+        modelBuilder.Entity<GeneratedApiEndpoint>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Path).IsRequired().HasMaxLength(500);
+            e.Property(x => x.Method).IsRequired().HasMaxLength(10);
+            e.Property(x => x.OperationId).IsRequired().HasMaxLength(200);
+            e.Property(x => x.BoundTable).HasMaxLength(400);
+            e.Ignore(x => x.IsServable);
+
+            // Serving a request lists the workspace's endpoints and matches in memory: the path template cannot
+            // be matched in SQL, and a workspace has tens of endpoints, not thousands.
+            e.HasIndex(x => x.WorkspaceId);
         });
 
         // DatasetRun — store JSON collections as strings

@@ -59,6 +59,7 @@ public static class PersistenceServiceCollectionExtensions
         services.AddScoped<IWebhookRepository, EfWebhookRepository>();
         services.AddScoped<ISchemaSnapshotRepository, EfSchemaSnapshotRepository>();
         services.AddScoped<IProfileSnapshotRepository, EfProfileSnapshotRepository>();
+        services.AddScoped<IApiContractRepository, EfApiContractRepository>();
 
         return services;
     }
