@@ -10,7 +10,12 @@ using Microsoft.Extensions.Hosting;
 
 var root = new RootCommand("Fabricate synthetic data CLI");
 
-var providerOption = new Option<string>("--provider", getDefaultValue: () => "sqlite", description: "Schema provider: sqlite or postgres");
+var providerOption = new Option<string>("--provider", getDefaultValue: () => "sqlite",
+    description: "Provider: sqlite, postgres, or a NoSQL provider — cosmosdb, mongodb, dynamodb, firestore");
+
+/// <summary>The NoSQL providers, which take a different discovery path from the relational ones (#71).</summary>
+static bool IsNoSqlProvider(string provider) =>
+    provider.ToLowerInvariant() is "cosmosdb" or "mongodb" or "dynamodb" or "firestore";
 var connectionOption = new Option<string>("--connection", "Database connection string") { IsRequired = true };
 var dbNameOption = new Option<string>("--database", getDefaultValue: () => "fabricate", description: "Database name in synthetic model");
 var seedOption = new Option<long>("--seed", getDefaultValue: () => 42L, description: "Deterministic seed");
@@ -26,6 +31,18 @@ var discover = new Command("discover", "Discover schema")
 
 discover.SetHandler(async (provider, connection, database, seed) =>
 {
+    // A NoSQL provider is discovered through its own adapter: there is no relational schema to build, and the
+    // metadata model has no foreign-key graph because document stores do not declare one.
+    if (IsNoSqlProvider(provider))
+    {
+        using var noSqlHost = BuildHost("sqlite", connection, database, seed);
+        var discoverer = noSqlHost.Services.GetRequiredService<INoSqlSchemaDiscovererFactory>().GetDiscoverer(provider);
+        var collections = await discoverer.DiscoverCollectionsAsync(connection, database);
+
+        Console.WriteLine(JsonSerializer.Serialize(collections, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        return;
+    }
+
     using var host = BuildHost(provider, connection, database, seed);
     var orchestrator = host.Services.GetRequiredService<ISyntheticDataOrchestrator>();
     var schema = await orchestrator.DiscoverAsync();
@@ -196,6 +213,19 @@ var discoverProfile = new Command("discover-profile", "Profile schema data distr
 
 discoverProfile.SetHandler(async (provider, connection, database, seed) =>
 {
+    if (IsNoSqlProvider(provider))
+    {
+        using var noSqlHost = BuildHost("sqlite", connection, database, seed);
+        var discoverer = noSqlHost.Services.GetRequiredService<INoSqlSchemaDiscovererFactory>().GetDiscoverer(provider);
+        var profiler = noSqlHost.Services.GetRequiredService<INoSqlDataProfilerFactory>().GetProfiler(provider);
+
+        var collections = await discoverer.DiscoverCollectionsAsync(connection, database);
+        var snapshot = await profiler.ProfileAsync(collections, connection);
+
+        Console.WriteLine(JsonSerializer.Serialize(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        return;
+    }
+
     using var host = BuildHost(provider, connection, database, seed);
     var orchestrator = host.Services.GetRequiredService<ISyntheticDataOrchestrator>();
     var reviewService = host.Services.GetRequiredService<ISchemaReviewService>();

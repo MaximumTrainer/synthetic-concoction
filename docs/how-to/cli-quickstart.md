@@ -245,3 +245,24 @@ VALUES (2,1,'bob@example.com','Bob Smith',1,'active');
 - Customise your rules file: see [Rules DSL Reference](rules-dsl.md)
 - Apply HIPAA masking: see [Compliance Profiles](compliance-profiles.md)
 - Call the REST API: see [REST API How-To](rest-api.md)
+
+## NoSQL providers
+
+`discover` and `discover-profile` accept the four document stores as well as `sqlite` and `postgres`:
+
+```bash
+fabricate discover --provider mongodb   --connection "mongodb://host:27017"        --database clinic
+fabricate discover --provider cosmosdb  --connection "$COSMOSDB_CONNECTION_STRING" --database clinic
+fabricate discover --provider dynamodb  --connection ""                            --database us-east-1
+fabricate discover --provider firestore --connection "my-gcp-project"              --database "(default)"
+
+fabricate discover-profile --provider mongodb --connection "mongodb://host:27017" --database clinic
+```
+
+`--connection` is the provider's own connection string, or empty to use ambient credentials — an IAM role for
+DynamoDB, Application Default Credentials for Firestore. Each provider also reads its usual environment variable
+(`MONGODB_CONNECTION_STRING`, `COSMOSDB_CONNECTION_STRING`, `GOOGLE_CLOUD_PROJECT`) when `--connection` is empty.
+
+Both commands print JSON in the same shape as the relational ones. Note that **collection metadata has no
+foreign-key graph** — document stores do not declare relationships, so there is none to discover. See the
+[user guide](../user-guide.md#nosql-discovery-and-profiling) for the metadata model's limits.

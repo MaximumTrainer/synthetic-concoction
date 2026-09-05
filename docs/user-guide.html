@@ -36,6 +36,7 @@
     <li><a href="#platform">Multi-Tenant Platform</a></li>
     <li><a href="#chat">Agent Chat</a></li>
     <li><a href="#workflows">Workflows &amp; Skills</a></li>
+    <li><a href="#nosql-discovery-and-profiling">NoSQL</a></li>
     <li><a href="#generated-apis">Generated APIs</a></li>
     <li><a href="#apikeys">API Keys</a></li>
     <li><a href="#selfref">Self-Referencing FK Backfill</a></li>
@@ -520,6 +521,24 @@ GET /accounts/{accountId}/llm-usage?groupBy=credential</code></pre>
 <p>Workflows define multi-step automation sequences triggered on demand via <code>POST /workflows/{id}/run</code>.</p>
 <p>The custom skill registry supports OpenAPI contract ingestion — import an external API spec to expose its operations as callable workflow steps.</p>
 
+<h2 id="nosql-discovery-and-profiling">NoSQL discovery and profiling</h2>
+<p>Fabricate discovers and profiles document stores as well as relational databases: <strong>Cosmos DB, MongoDB, DynamoDB and Firestore</strong>.</p>
+<pre><code class="language-bash">fabricate discover --provider mongodb --connection &quot;mongodb://host:27017&quot; --database clinic
+fabricate discover-profile --provider mongodb --connection &quot;mongodb://host:27017&quot; --database clinic</code></pre>
+<p><code>discover</code> prints collection metadata — fields with inferred types, partition key, indexes. <code>discover-profile</code> prints a <code>NoSqlProfileSnapshot</code>: document count per collection, and per field its inferred type, non-null and null counts, a distinct-value estimate, and a minimum and maximum.</p>
+<h3 id="what-the-metadata-model-does-not-have">What the metadata model does not have</h3>
+<p><strong>No foreign-key graph.</strong> Document stores do not declare relationships, so nothing can be inferred that the database itself does not know. The relational generator's referential integrity — parent rows before children, foreign keys pointing at real rows — has no equivalent here, and collection metadata carries no <code>ForeignKeySchema</code>. Relationships between collections are a matter of application convention, and Fabricate does not guess at them.</p>
+<ul>
+<li><strong>Fields come from a sample</strong> of up to 200 documents per collection. A field appearing only in older or rarer documents may not be seen at all, and a field with more than one type across documents is reported as <code>Unknown</code> rather than the first type seen.</li>
+<li><strong>Counts are the provider's own.</strong> MongoDB's estimated count and DynamoDB's <code>ItemCount</code> are both approximate by the service's definition — DynamoDB's updates roughly every six hours. Cosmos DB and Firestore counts are exact server-side aggregates.</li>
+</ul>
+<h3 id="profiles-never-contain-document-content">Profiles never contain document content</h3>
+<p>A profile is aggregates. Two consequences that are easy to miss:</p>
+<ul>
+<li><strong>String fields report length, not value.</strong> A string minimum and maximum are verbatim customer values, and on a field with few distinct values they <em>are</em> the field's content — a free-text note column with one entry would otherwise report that entry as both its minimum and its maximum. The length range carries the shape without the content. Numbers, dates and identifiers report real minima and maxima, where the value is a measure rather than a piece of text.</li>
+<li><strong>Arrays and binary fields report length only</strong>, and Mongo's <code>_id</code> is skipped, for the same reason.</li>
+</ul>
+<p>Distinct values are counted exactly up to 1000 and reported as 1000 beyond that: an exact count on a high-cardinality field would mean holding every value, which is the data itself.</p>
 <h2 id="generated-apis">Generated APIs</h2>
 <p>Ingest an OpenAPI contract, bind its operations to a generated dataset, and serve them — a mock API whose payloads come from your own generated data and match the contract you gave it.</p>
 <h3 id="post-api-contracts">POST /workspaces/{workspaceId}/api-contracts</h3>

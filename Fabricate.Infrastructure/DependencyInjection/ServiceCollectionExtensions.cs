@@ -243,6 +243,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<INoSqlSchemaDiscoverer, FirestoreSchemaDiscoverer>();
         services.AddSingleton<INoSqlSchemaDiscovererFactory, NoSqlSchemaDiscovererFactory>();
 
+        // #71 — the profiling half of #52's design. Aggregate-only: no adapter returns document content.
+        services.AddSingleton<INoSqlDataProfiler, MongoDbDataProfiler>();
+        services.AddSingleton<INoSqlDataProfiler, CosmosDbDataProfiler>();
+        services.AddSingleton<INoSqlDataProfiler, DynamoDbDataProfiler>();
+        services.AddSingleton<INoSqlDataProfiler, FirestoreDataProfiler>();
+        services.AddSingleton<INoSqlDataProfilerFactory, NoSqlDataProfilerFactory>();
+
         return services;
     }
 

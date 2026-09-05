@@ -964,6 +964,53 @@ Fabricate has a custom skill registry. Skills are callable units registered in t
 
 ---
 
+## NoSQL discovery and profiling
+
+Fabricate discovers and profiles document stores as well as relational databases: **Cosmos DB, MongoDB, DynamoDB
+and Firestore**.
+
+```bash
+fabricate discover --provider mongodb --connection "mongodb://host:27017" --database clinic
+fabricate discover-profile --provider mongodb --connection "mongodb://host:27017" --database clinic
+```
+
+`discover` prints collection metadata — fields with inferred types, partition key, indexes. `discover-profile`
+prints a `NoSqlProfileSnapshot`: document count per collection, and per field its inferred type, non-null and null
+counts, a distinct-value estimate, and a minimum and maximum.
+
+### What the metadata model does not have
+
+**No foreign-key graph.** Document stores do not declare relationships, so nothing can be inferred that the
+database itself does not know. The relational generator's referential integrity — parent rows before children,
+foreign keys pointing at real rows — has no equivalent here, and collection metadata carries no
+`ForeignKeySchema`. Relationships between collections are a matter of application convention, and Fabricate does
+not guess at them.
+
+Two further limits worth knowing:
+
+- **Fields come from a sample.** Up to 200 documents per collection. A field appearing only in older or rarer
+  documents may not be seen at all, and a field's type is whatever those documents showed — a field with more
+  than one type across documents is reported as `Unknown` rather than the first type seen.
+- **Counts are the provider's own.** MongoDB's estimated count and DynamoDB's `ItemCount` are both approximate by
+  the service's definition — DynamoDB's updates roughly every six hours. Cosmos DB and Firestore counts are exact
+  server-side aggregates.
+
+### Profiles never contain document content
+
+A profile is aggregates. Two consequences that are easy to miss:
+
+- **String fields report length, not value.** A string minimum and maximum are verbatim customer values, and on a
+  field with few distinct values they *are* the field's content — a free-text note column with one entry would
+  otherwise report that entry as both its minimum and its maximum. The length range carries the shape without the
+  content. Numbers, dates and identifiers report real minima and maxima, where the value is a measure rather than
+  a piece of text.
+- **Arrays and binary fields report length only**, and Mongo's `_id` is skipped, for the same reason.
+
+Distinct values are counted exactly up to 1000 and reported as 1000 beyond that: an exact count on a
+high-cardinality field would mean holding every value, which is the data itself.
+
+---
+
 ## Generated APIs
 
 Ingest an OpenAPI contract, bind its operations to a generated dataset, and serve them — a mock API whose payloads
