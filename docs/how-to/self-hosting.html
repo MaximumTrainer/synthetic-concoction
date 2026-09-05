@@ -114,7 +114,21 @@ curl -s http://localhost:8080/healthz</code></pre>
 <tr><td>Databases you point schema discovery at</td><td>when you run discovery</td></tr>
 </tbody>
 </table>
-<p>Selecting <code>openai-compatible</code> with a private base URL and <code>FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS=true</code> yields an instance that makes no calls outside your network. Schema metadata (table, column, type and relationship names) is sent to the model as tool output; row values are not.</p>
+<p>Selecting <code>openai-compatible</code> with a private base URL and <code>FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS=true</code> yields an instance that makes no calls outside your network.</p>
+<h3 id="the-prompt-data-boundary">The prompt data boundary</h3>
+<p>What may reach a model provider is enforced in code, not left to convention. Every tool declares the most sensitive class of content its result can carry, and a tool whose class the boundary forbids is <strong>never offered to the model</strong> — so the model cannot ask for it and be refused halfway through a turn, which would both disclose that the data exists and leave the user with a broken conversation.</p>
+<table>
+<thead><tr><th>Content class</th><th>What it is</th><th>When it may be sent</th></tr></thead>
+<tbody>
+<tr><td><code>Metadata</code></td><td>Table, column, type and relationship names; run summaries. Describes the data rather than containing it.</td><td>Always. Without it the agent is useless.</td></tr>
+<tr><td><code>AggregateStatistics</code></td><td>Histograms, distinct counts, min/max over real rows. No single row is disclosed, but a min/max is a real value and a histogram over a small table can identify individuals.</td><td>Only with the workspace opt-in.</td></tr>
+<tr><td><code>SampledValues</code></td><td>Values copied from real rows — samples, examples, few-shot rows.</td><td>Only with the workspace opt-in.</td></tr>
+</tbody>
+</table>
+<p>The opt-in is <code>allowSampledDataInPrompts</code> on the workspace LLM policy (<code>PUT /workspaces/{id}/llm-credentials/policy</code>), and it defaults to <strong>false</strong>.</p>
+<p><strong>It cannot be enabled at all on a <code>Healthcare</code> or <code>Finance</code> workspace.</strong> The request is refused with <code>409</code> and an explanation, and the policy is left exactly as it was — refused rather than silently ignored, because an administrator told "saved" while the setting did not take is worse off than one told why it cannot be. A workspace's compliance profile is fixed when it is created. The profile is also re-checked at every decision, so an opt-in written before a profile changed does not survive the change.</p>
+<p>Every refusal is audited as <code>llm.boundary_blocked</code> with the tool name and content class, and never the payload.</p>
+<p>Today's tools all return <code>Metadata</code>, so the boundary changes nothing for them. It exists ahead of the tools that will need it — NoSQL discovery samples documents to infer field types, data profilers compute per-column statistics, and any future "explain this data" tool sends values by construction.</p>
 <h2 id="cost-fly-reference-configuration">Cost (Fly reference configuration)</h2>
 <p>Assumptions: one <code>shared-cpu-1x</code> 512 MB machine that stops when idle, the smallest PostgreSQL plan, light usage. The database is the floor of the bill because it does not scale to zero; an external free-tier PostgreSQL (e.g. Neon) is the lowest-cost option. Check Fly's current pricing page for figures — they change more often than this document.</p>
 <h2 id="health-and-readiness">Health and readiness</h2>

@@ -10,7 +10,7 @@ public sealed class WorkspaceService(
 {
     public async Task<Workspace> CreateAsync(CreateWorkspaceCommand command, CancellationToken cancellationToken = default)
     {
-        var workspace = new Workspace(Guid.NewGuid(), command.AccountId, command.Name, DateTimeOffset.UtcNow);
+        var workspace = new Workspace(Guid.NewGuid(), command.AccountId, command.Name, DateTimeOffset.UtcNow, command.ComplianceProfile);
         await workspaceRepository.SaveAsync(workspace, cancellationToken).ConfigureAwait(false);
 
         await workspaceRepository.SaveMembershipAsync(
@@ -20,7 +20,8 @@ public sealed class WorkspaceService(
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), command.AccountId, command.CreatedByUserId,
             "workspace.created", "Workspace", workspace.Id.ToString(),
-            Guid.NewGuid().ToString(), DateTimeOffset.UtcNow), cancellationToken).ConfigureAwait(false);
+            Guid.NewGuid().ToString(), DateTimeOffset.UtcNow,
+            $"complianceProfile={workspace.ComplianceProfile}"), cancellationToken).ConfigureAwait(false);
 
         return workspace;
     }

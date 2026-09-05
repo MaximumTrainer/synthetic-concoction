@@ -82,7 +82,20 @@ public static class LlmCredentialRoutes
             ILlmCredentialService service,
             HttpContext ctx,
             CancellationToken ct) =>
-            Results.Ok(await service.SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, ct).ConfigureAwait(false)))
+        {
+            try
+            {
+                return Results.Ok(await service
+                    .SetPolicyAsync(workspaceId, req.AllowPlatformFallback, ctx.GetUserId(), req.AllowedTools, req.AllowSampledDataInPrompts, ct)
+                    .ConfigureAwait(false));
+            }
+            catch (InvalidOperationException ex)
+            {
+                // The sampled-data opt-in is refused outright on a Healthcare or Finance workspace (#83). A 409
+                // rather than a 400: the request is well-formed, it conflicts with the workspace's own profile.
+                return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
+            }
+        })
             .WithName("SetWorkspaceLlmPolicy");
 
         return group;
@@ -102,4 +115,7 @@ public sealed record RegisterLlmCredentialRequest(
 
 public sealed record RotateLlmCredentialRequest(string Secret);
 /// <param name="AllowedTools">Null leaves the tool allowlist unchanged; an empty array offers the model no tools.</param>
-public sealed record SetLlmPolicyRequest(bool AllowPlatformFallback, IReadOnlyList<string>? AllowedTools = null);
+public sealed record SetLlmPolicyRequest(
+    bool AllowPlatformFallback,
+    IReadOnlyList<string>? AllowedTools = null,
+    bool? AllowSampledDataInPrompts = null);

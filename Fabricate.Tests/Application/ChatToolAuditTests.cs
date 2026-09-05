@@ -39,7 +39,7 @@ public sealed class ChatToolAuditTests
             _sessions, _tools, _workspaces,
             new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaces),
             new NoCredentialResolver(), new ThrowingFactory(), new HeuristicTokenBudgetEstimator(), _policyStore,
-            audit, _workspaceRepo, new LlmOptions());
+            audit, _workspaceRepo, new PromptDataBoundary(), new LlmOptions());
     }
 
     private async Task<(Guid WorkspaceId, Guid UserId, ChatSession Session)> CreateSessionAsync(ChatMode mode = ChatMode.Autonomous)

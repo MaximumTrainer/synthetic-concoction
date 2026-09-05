@@ -41,7 +41,7 @@ public sealed class PromptInjectionTests
             new Dictionary<string, string>(), LlmCredentialSource.WorkspaceDefault);
         _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService),
             new FixedResolver(credential), new FixedFactory(_client), new HeuristicTokenBudgetEstimator(), _policyStore,
-            audit, _workspaceRepo, new LlmOptions());
+            audit, _workspaceRepo, new PromptDataBoundary(), new LlmOptions());
     }
 
     private async Task<(Guid wsId, Guid userId, ChatSession session)> CreateSessionAsync()

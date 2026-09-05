@@ -171,8 +171,35 @@ A running instance makes outbound connections **only** to:
 | Databases you point schema discovery at | when you run discovery |
 
 Selecting `openai-compatible` with a private base URL and `FABRICATE_LLM_ALLOW_PRIVATE_ENDPOINTS=true` yields an
-instance that makes no calls outside your network. Schema metadata (table, column, type and relationship names) is
-sent to the model as tool output; row values are not.
+instance that makes no calls outside your network.
+
+### The prompt data boundary
+
+What may reach a model provider is enforced in code, not left to convention. Every tool declares the most
+sensitive class of content its result can carry, and a tool whose class the boundary forbids is **never offered to
+the model** — so the model cannot ask for it and be refused halfway through a turn, which would both disclose that
+the data exists and leave the user with a broken conversation.
+
+| Content class | What it is | When it may be sent |
+| --- | --- | --- |
+| `Metadata` | Table, column, type and relationship names; run summaries. Describes the data rather than containing it. | Always. Without it the agent is useless. |
+| `AggregateStatistics` | Histograms, distinct counts, min/max over real rows. No single row is disclosed, but a min/max is a real value and a histogram over a small table can identify individuals. | Only with the workspace opt-in. |
+| `SampledValues` | Values copied from real rows — samples, examples, few-shot rows. | Only with the workspace opt-in. |
+
+The opt-in is `allowSampledDataInPrompts` on the workspace LLM policy
+(`PUT /workspaces/{id}/llm-credentials/policy`), and it defaults to **false**.
+
+**It cannot be enabled at all on a `Healthcare` or `Finance` workspace.** The request is refused with `409` and an
+explanation, and the policy is left exactly as it was — refused rather than silently ignored, because an
+administrator told "saved" while the setting did not take is worse off than one told why it cannot be. A
+workspace's compliance profile is fixed when it is created. The profile is also re-checked at every decision, so
+an opt-in written before a profile changed does not survive the change.
+
+Every refusal is audited as `llm.boundary_blocked` with the tool name and content class, and never the payload.
+
+Today's tools all return `Metadata`, so the boundary changes nothing for them. It exists ahead of the tools that
+will need it — NoSQL discovery samples documents to infer field types, data profilers compute per-column
+statistics, and any future "explain this data" tool sends values by construction.
 
 ## Cost (Fly reference configuration)
 

@@ -13,11 +13,15 @@ export interface AccountMembership {
   joinedAt: string;
 }
 
+export type ComplianceProfileName = "Default" | "Healthcare" | "Finance";
+
 export interface Workspace {
   id: string;
   accountId: string;
   name: string;
   createdAt: string;
+  /** Fixed at creation. Governs generation defaults and what may be sent to a model provider. */
+  complianceProfile: ComplianceProfileName;
 }
 
 export type ProjectStatus = "Active" | "Archived";
@@ -217,12 +221,22 @@ export interface WorkspaceLlmPolicy {
   updatedAt: string;
   /** `null` means every registered tool; an empty array means none. */
   allowedTools: string[] | null;
+  /**
+   * Whether tool results carrying sampled row values or profiling aggregates may enter a prompt. Defaults to
+   * false: schema metadata may leave the instance, the data itself may not until someone opts in.
+   */
+  allowSampledDataInPrompts: boolean;
 }
 
 export interface SetWorkspaceLlmPolicyRequest {
   allowPlatformFallback: boolean;
   /** Omit to leave the tool allowlist unchanged. */
   allowedTools?: string[];
+  /**
+   * Omit to leave unchanged. Setting it to `true` on a `Healthcare` or `Finance` workspace is **refused** with
+   * HTTP 409 and leaves the policy untouched — the answer is fixed by the compliance profile, not per workspace.
+   */
+  allowSampledDataInPrompts?: boolean;
 }
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────

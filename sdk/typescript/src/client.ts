@@ -8,6 +8,7 @@ import type {
   ChatSession,
   ChatStreamEvent,
   ChatTurnResult,
+  ComplianceProfileName,
   FabricateClientOptions,
   DatasetRun,
   InstructionVersion,
@@ -77,11 +78,16 @@ export class FabricateClient {
 
   // ─── Workspaces ──────────────────────────────────────────────────────────────
 
+  /**
+   * Creates a workspace. `complianceProfile` is fixed at creation: a `Healthcare` or `Finance` workspace can
+   * never opt in to sending sampled data to a model provider.
+   */
   async createWorkspace(
     accountId: string,
-    name: string
+    name: string,
+    complianceProfile: ComplianceProfileName = "Default"
   ): Promise<Workspace> {
-    return this.post<Workspace>("/workspaces", { accountId, name });
+    return this.post<Workspace>("/workspaces", { accountId, name, complianceProfile });
   }
 
   async getWorkspace(workspaceId: string): Promise<Workspace> {

@@ -1,4 +1,5 @@
 using Fabricate.Application.Abstractions;
+using Fabricate.Domain.Enums;
 using Fabricate.Domain.Models;
 
 namespace Fabricate.Api.Routes;
@@ -17,7 +18,7 @@ public static class WorkspaceRoutes
         {
             var userId = ctx.GetUserId();
             var workspace = await workspaceService.CreateAsync(
-                new CreateWorkspaceCommand(req.AccountId, req.Name, userId), ct).ConfigureAwait(false);
+                new CreateWorkspaceCommand(req.AccountId, req.Name, userId, req.ComplianceProfile), ct).ConfigureAwait(false);
             return Results.Ok(workspace);
         }).WithName("CreateWorkspace");
 
@@ -109,7 +110,14 @@ public static class WorkspaceRoutes
     }
 }
 
-public sealed record CreateWorkspaceRequest(Guid AccountId, string Name);
+/// <param name="ComplianceProfile">
+/// Fixed at creation. Healthcare and Finance workspaces cannot opt in to sending sampled data to a model
+/// provider at all (#83), so this is a decision about the data, not a preference.
+/// </param>
+public sealed record CreateWorkspaceRequest(
+    Guid AccountId,
+    string Name,
+    ComplianceProfile ComplianceProfile = ComplianceProfile.Default);
 public sealed record GrantWorkspaceAccessRequest(Guid PrincipalId, bool IsGroup, WorkspaceRole Role);
 public sealed record AddConnectionRequest(string Name, string Provider);
 public sealed record SaveInstructionRequest(string Content);

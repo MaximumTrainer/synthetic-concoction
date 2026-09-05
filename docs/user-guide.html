@@ -441,7 +441,16 @@ tables:
   <tr><td><code>generate_data</code></td><td>Runs the full generation pipeline, returns JSON result with row and table counts.</td></tr>
 </table>
 <p>Each workspace can be restricted to a subset of tools; the allowlist is enforced server-side. <code>/tool &lt;name&gt; &lt;json&gt;</code> invokes a tool directly, bypassing the model.</p>
-<p>Workspace-level <strong>agent instructions</strong> are prepended to every session in that workspace as a system prompt; project instructions and a per-session override layer on top. Schema metadata and tool outputs are sent to the model; row values from your databases are not.</p>
+<p>Workspace-level <strong>agent instructions</strong> are prepended to every session in that workspace as a system prompt; project instructions and a per-session override layer on top.</p>
+<h3 id="what-is-sent-to-the-model">What is sent to the model</h3>
+<p>Schema metadata — table, column and type names, relationships — and tool outputs. <strong>Row values are not sent</strong>, and that is enforced rather than assumed: every tool declares what class of content its result carries, and a tool whose class the boundary forbids is not offered to the model at all.</p>
+<table>
+  <tr><th>Content class</th><th>May be sent</th></tr>
+  <tr><td><code>Metadata</code> — names, shapes, run summaries</td><td>Always</td></tr>
+  <tr><td><code>AggregateStatistics</code> — histograms, distinct counts, min/max over real rows</td><td>Only with the workspace opt-in</td></tr>
+  <tr><td><code>SampledValues</code> — values copied from real rows</td><td>Only with the workspace opt-in</td></tr>
+</table>
+<p>The opt-in is <code>allowSampledDataInPrompts</code> on the workspace LLM policy and defaults to false. It <strong>cannot be enabled on a <code>Healthcare</code> or <code>Finance</code> workspace</strong>: the request is refused with <code>409</code> and the policy is left unchanged. Every refusal is audited as <code>llm.boundary_blocked</code> with the tool name and content class, never the payload. See <a href="how-to/self-hosting.html#the-prompt-data-boundary">the self-hosting guide</a>.</p>
 
 <h2 id="workflows">12. Workflows &amp; Skills</h2>
 <p>Workflows define multi-step automation sequences triggered on demand via <code>POST /workflows/{id}/run</code>.</p>

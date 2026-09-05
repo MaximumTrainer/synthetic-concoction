@@ -206,7 +206,11 @@ test("account and workspace methods keep their routes", async () => {
     "GET /workspaces/ws1",
   ]);
   assert.deepEqual(calls[3].body, { email: "person@example.com", expiresInHours: 72 });
-  assert.deepEqual(calls[4].body, { accountId: "a1", name: "Platform" });
+  assert.deepEqual(calls[4].body, {
+    accountId: "a1",
+    name: "Platform",
+    complianceProfile: "Default",
+  }, "the compliance profile is fixed at creation, so it is always sent");
 });
 
 test("pollRun stops on a terminal status", async () => {

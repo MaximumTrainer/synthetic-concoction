@@ -15,6 +15,7 @@ public sealed class LlmCredentialService(
     IWorkspaceService workspaceService,
     IAuditLogService auditLogService,
     ILlmCredentialProbe probe,
+    IPromptDataBoundary promptDataBoundary,
     LlmOptions options) : ILlmCredentialService
 {
     public async Task<LlmCredentialSummary> RegisterAsync(RegisterLlmCredentialCommand command, Guid requestingUserId, CancellationToken cancellationToken = default)
@@ -150,7 +151,7 @@ public sealed class LlmCredentialService(
             ?? new WorkspaceLlmPolicy(workspaceId, false, DateTimeOffset.MinValue);
     }
 
-    public async Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, CancellationToken cancellationToken = default)
+    public async Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, CancellationToken cancellationToken = default)
     {
         var workspace = await RequireRoleAsync(workspaceId, requestingUserId, WorkspaceRole.Admin, cancellationToken).ConfigureAwait(false);
 
@@ -159,13 +160,30 @@ public sealed class LlmCredentialService(
             ? existing?.AllowedTools
             : allowedTools.Select(t => t.Trim()).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
-        var policy = await store.SavePolicyAsync(new WorkspaceLlmPolicy(workspaceId, allowPlatformFallback, DateTimeOffset.UtcNow, tools), cancellationToken).ConfigureAwait(false);
+        // Refused, not ignored: an administrator who is told "saved" while the setting did not take is worse off
+        // than one who is told why it cannot (#83). Only an attempt to turn it *on* is refused — turning it off
+        // is always allowed, whatever the profile.
+        var sampledData = allowSampledDataInPrompts ?? existing?.AllowSampledDataInPrompts ?? false;
+        if (sampledData && !promptDataBoundary.CanOptIn(workspace.ComplianceProfile))
+        {
+            await auditLogService.RecordAsync(new AuditEvent(
+                Guid.NewGuid(), workspace.AccountId, requestingUserId,
+                "llm.boundary_blocked", "Workspace", workspaceId.ToString(),
+                Guid.NewGuid().ToString(), DateTimeOffset.UtcNow,
+                $"reason=opt_in_refused;complianceProfile={workspace.ComplianceProfile}"), cancellationToken).ConfigureAwait(false);
+
+            throw new InvalidOperationException(promptDataBoundary.OptInRefusalReason(workspace.ComplianceProfile));
+        }
+
+        var policy = await store.SavePolicyAsync(
+            new WorkspaceLlmPolicy(workspaceId, allowPlatformFallback, DateTimeOffset.UtcNow, tools, sampledData),
+            cancellationToken).ConfigureAwait(false);
 
         await auditLogService.RecordAsync(new AuditEvent(
             Guid.NewGuid(), workspace.AccountId, requestingUserId,
             "llm_policy.updated", "Workspace", workspaceId.ToString(),
             Guid.NewGuid().ToString(), DateTimeOffset.UtcNow,
-            $"allowPlatformFallback={allowPlatformFallback};allowedTools={(tools is null ? "all" : string.Join(",", tools))}"), cancellationToken).ConfigureAwait(false);
+            $"allowPlatformFallback={allowPlatformFallback};allowedTools={(tools is null ? "all" : string.Join(",", tools))};allowSampledDataInPrompts={sampledData}"), cancellationToken).ConfigureAwait(false);
 
         return policy;
     }

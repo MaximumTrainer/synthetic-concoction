@@ -325,7 +325,11 @@ public interface IAuditLogRepository
 
 // ── #28: Workspace ports ──────────────────────────────────────────────────────
 
-public sealed record CreateWorkspaceCommand(Guid AccountId, string Name, Guid CreatedByUserId);
+public sealed record CreateWorkspaceCommand(
+    Guid AccountId,
+    string Name,
+    Guid CreatedByUserId,
+    ComplianceProfile ComplianceProfile = ComplianceProfile.Default);
 public sealed record GrantWorkspaceAccessCommand(Guid WorkspaceId, Guid PrincipalId, bool IsGroup, WorkspaceRole Role, Guid RequestingUserId);
 
 public interface IWorkspaceService
@@ -474,6 +478,14 @@ public interface ITool
 
     /// <summary>JSON Schema for the tool's input object, advertised to the model. Defaults to an open object.</summary>
     string InputSchemaJson => """{"type":"object","properties":{},"additionalProperties":true}""";
+
+    /// <summary>
+    /// The most sensitive class of content this tool's result can carry (#83). Defaults to
+    /// <see cref="Llm.PromptContentClass.Metadata"/> — names and shapes — because that is what every tool that
+    /// exists today returns. A tool that samples rows or computes statistics over them must say so: the prompt
+    /// data boundary uses this to decide whether the tool is offered to the model at all.
+    /// </summary>
+    Llm.PromptContentClass ContentClass => Llm.PromptContentClass.Metadata;
 
     Task<string> ExecuteAsync(string inputJson, Guid sessionId, Guid userId, CancellationToken cancellationToken = default);
 }
@@ -770,5 +782,10 @@ public interface ILlmCredentialService
     Task<LlmCredentialValidationResult> ValidateAsync(Guid workspaceId, Guid credentialId, Guid requestingUserId, CancellationToken cancellationToken = default);
     Task<WorkspaceLlmPolicy> GetPolicyAsync(Guid workspaceId, Guid requestingUserId, CancellationToken cancellationToken = default);
     /// <param name="allowedTools">Null leaves the tool allowlist unchanged; an empty list offers the model no tools.</param>
-    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Updates the workspace's LLM policy. Setting <paramref name="allowSampledDataInPrompts"/> on a Healthcare or
+    /// Finance workspace throws <see cref="InvalidOperationException"/> and leaves the policy unchanged — the
+    /// opt-in is refused, not silently ignored, so an administrator is not left believing it took effect (#83).
+    /// </summary>
+    Task<WorkspaceLlmPolicy> SetPolicyAsync(Guid workspaceId, bool allowPlatformFallback, Guid requestingUserId, IReadOnlyList<string>? allowedTools = null, bool? allowSampledDataInPrompts = null, CancellationToken cancellationToken = default);
 }

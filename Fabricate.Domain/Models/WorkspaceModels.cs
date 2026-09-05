@@ -1,3 +1,5 @@
+using Fabricate.Domain.Enums;
+
 namespace Fabricate.Domain.Models;
 
 public enum WorkspaceRole
@@ -7,11 +9,16 @@ public enum WorkspaceRole
     Admin
 }
 
+/// <param name="ComplianceProfile">
+/// The regime the workspace's data falls under. Governs generation defaults and, since #83, what may be sent to a
+/// model provider: a Healthcare or Finance workspace cannot opt in to putting sampled row values in prompts at all.
+/// </param>
 public sealed record Workspace(
     Guid Id,
     Guid AccountId,
     string Name,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    ComplianceProfile ComplianceProfile = ComplianceProfile.Default);
 
 public sealed record WorkspaceMembership(
     Guid WorkspaceId,

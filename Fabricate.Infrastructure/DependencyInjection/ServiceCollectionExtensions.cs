@@ -69,6 +69,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAccountGroupService, AccountGroupService>();
         services.AddScoped<IAllowedDomainService, AllowedDomainService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
+        // #83 — the prompt data boundary is stateless policy, so a singleton.
+        services.TryAddSingleton<IPromptDataBoundary, PromptDataBoundary>();
         // Retention defaults to "keep everything" (#74); the host overrides this from the environment.
         services.TryAddSingleton(new AuditRetentionOptions());
         services.TryAddSingleton(TimeProvider.System);
@@ -221,6 +223,10 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ISecretCipher, DataProtectionSecretCipher>();
         services.AddSingleton<ILlmCredentialStore, InMemoryLlmCredentialStore>();
+
+        // #83 — the prompt data boundary is stateless policy. Registered here as well as in the core
+        // registration because LlmCredentialService, which enforces the opt-in refusal, is registered here.
+        services.TryAddSingleton<IPromptDataBoundary, PromptDataBoundary>();
         services.AddSingleton<IChatCompletionClientFactory, ChatCompletionClientFactory>();
         services.AddScoped<ILlmCredentialProbe, ChatCompletionCredentialProbe>();
         services.AddScoped<ILlmCredentialResolver, LlmCredentialResolver>();

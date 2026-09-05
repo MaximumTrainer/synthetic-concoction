@@ -72,11 +72,17 @@ public sealed record LlmCredentialSummary(
 /// Per-workspace agent policy: whether the operator's platform credential may be used, and which tools the model
 /// may be offered. <see cref="AllowedTools"/> null means every registered tool; an empty list means none.
 /// </summary>
+/// <param name="AllowSampledDataInPrompts">
+/// Whether tool results carrying sampled row values or profiling aggregates may enter a prompt (#83). Defaults to
+/// false: schema metadata may leave the instance, the data itself may not until someone with authority says so.
+/// It cannot be set at all on a Healthcare or Finance workspace — see <see cref="PromptDataBoundary"/>.
+/// </param>
 public sealed record WorkspaceLlmPolicy(
     Guid WorkspaceId,
     bool AllowPlatformFallback,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<string>? AllowedTools = null);
+    IReadOnlyList<string>? AllowedTools = null,
+    bool AllowSampledDataInPrompts = false);
 
 public sealed record LlmCredentialValidationResult(
     Guid CredentialId,

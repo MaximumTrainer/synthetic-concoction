@@ -782,8 +782,20 @@ Each workspace can store **agent instructions** — a system prompt that is prep
 
 ### What is sent to the model
 
-Schema metadata (table, column and type names, relationships) and tool outputs. Row values from your databases are
-not read by the tools and are not sent.
+Schema metadata — table, column and type names, relationships — and tool outputs. **Row values are not sent**, and
+that is enforced rather than assumed: every tool declares what class of content its result carries, and a tool
+whose class the boundary forbids is not offered to the model at all.
+
+| Content class | May be sent |
+|---|---|
+| `Metadata` — names, shapes, run summaries | Always |
+| `AggregateStatistics` — histograms, distinct counts, min/max over real rows | Only with the workspace opt-in |
+| `SampledValues` — values copied from real rows | Only with the workspace opt-in |
+
+The opt-in is `allowSampledDataInPrompts` on the workspace LLM policy and defaults to false. It **cannot be
+enabled on a `Healthcare` or `Finance` workspace**: the request is refused with `409` and the policy is left
+unchanged. Every refusal is audited as `llm.boundary_blocked` with the tool name and content class, never the
+payload. See [the self-hosting guide](how-to/self-hosting.md#the-prompt-data-boundary).
 
 ---
 

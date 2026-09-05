@@ -40,7 +40,7 @@ public sealed class AgentChatTurnTests
 
         _chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
             new FixedResolver(credential), new FixedFactory(_client), _estimator, _policyStore,
-            _audit, _workspaceRepo, _options);
+            _audit, _workspaceRepo, new PromptDataBoundary(), _options);
     }
 
     [Fact]
@@ -294,7 +294,7 @@ public sealed class AgentChatTurnTests
         var (_, userId, session) = await CreateSessionAsync();
         var chat = new AgentChatService(_sessionRepo, _toolRegistry, _workspaceService, _instructionService,
             new FixedResolver(null), new FixedFactory(_client), _estimator, _policyStore,
-            _audit, _workspaceRepo, _options);
+            _audit, _workspaceRepo, new PromptDataBoundary(), _options);
 
         var turn = await chat.SendMessageAsync(new SendMessageCommand(session.Id, userId, "hello"));
         turn.AssistantMessage!.Content.Should().Contain("No LLM credential is configured");

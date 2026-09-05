@@ -911,6 +911,9 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("ComplianceProfile")
+                        .HasColumnType("integer");
+
                     b.Property<long>("CreatedAt")
                         .HasColumnType("bigint");
 
@@ -933,6 +936,9 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
                         .HasColumnType("uuid");
 
                     b.Property<bool>("AllowPlatformFallback")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("AllowSampledDataInPrompts")
                         .HasColumnType("boolean");
 
                     b.Property<string>("AllowedTools")

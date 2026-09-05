@@ -10,6 +10,7 @@ export type {
   ChatStreamEvent,
   ChatTurnResult,
   ComplianceProfile,
+  ComplianceProfileName,
   FabricateClientOptions,
   DatasetRun,
   InstructionVersion,

@@ -17,9 +17,38 @@ public sealed class AgentChatService(
     ILlmCredentialStore policyStore,
     IAuditLogService auditLog,
     IWorkspaceRepository workspaceRepository,
+    IPromptDataBoundary promptDataBoundary,
     LlmOptions options) : IAgentChatService
 {
     private const string ToolCommandPrefix = "/tool ";
+
+    /// <summary>
+    /// Drops tools whose results the prompt data boundary forbids for this workspace (#83). Filtering here rather
+    /// than refusing at execution time means the model is never told such a tool exists, so it cannot ask for it
+    /// and be refused mid-turn — which would both disclose that the data is there and break the conversation.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> FilterByDataBoundaryAsync(
+        IReadOnlyList<string> toolNames,
+        Guid workspaceId,
+        CancellationToken cancellationToken)
+    {
+        var workspace = await workspaceRepository.GetByIdAsync(workspaceId, cancellationToken).ConfigureAwait(false);
+        if (workspace is null) return toolNames;
+
+        var policy = await policyStore.GetPolicyAsync(workspaceId, cancellationToken).ConfigureAwait(false);
+        var allowed = new List<string>(toolNames.Count);
+
+        foreach (var name in toolNames)
+        {
+            var tool = toolRegistry.Resolve(name);
+            if (tool is null || promptDataBoundary.Allows(tool.ContentClass, workspace, policy))
+            {
+                allowed.Add(name);
+            }
+        }
+
+        return allowed;
+    }
 
     /// <summary>
     /// Tools the workspace may use: the registry's (code-level) allowlist intersected with the persisted workspace
@@ -27,7 +56,8 @@ public sealed class AgentChatService(
     /// </summary>
     private async Task<IReadOnlyList<string>> GetAllowedToolsAsync(Guid workspaceId, CancellationToken cancellationToken)
     {
-        var registered = toolRegistry.AllowedTools(workspaceId);
+        var registered = await FilterByDataBoundaryAsync(toolRegistry.AllowedTools(workspaceId), workspaceId, cancellationToken)
+            .ConfigureAwait(false);
         var policy = await policyStore.GetPolicyAsync(workspaceId, cancellationToken).ConfigureAwait(false);
         if (policy?.AllowedTools is null)
             return registered;
@@ -459,15 +489,37 @@ public sealed class AgentChatService(
 
         // A tool call that the workspace does not allow is a security event, not merely a failure, so it gets its
         // own action rather than being buried among ordinary errors (#72).
+        var blockedByBoundary = tool is null && await IsBlockedByDataBoundaryAsync(session, invocation.ToolName, cancellationToken).ConfigureAwait(false);
+
         await AuditToolAsync(
             session,
             saved,
-            tool is null ? "chat.tool_blocked" : status == ToolInvocationStatus.Succeeded ? "chat.tool_invoked" : "chat.tool_failed",
+            blockedByBoundary ? "llm.boundary_blocked" : tool is null ? "chat.tool_blocked"
+                : status == ToolInvocationStatus.Succeeded ? "chat.tool_invoked" : "chat.tool_failed",
             userId,
-            tool is null ? "reason=not_allowed_in_workspace" : null,
+            blockedByBoundary
+                ? $"reason=prompt_data_boundary;contentClass={toolRegistry.Resolve(invocation.ToolName)!.ContentClass}"
+                : tool is null ? "reason=not_allowed_in_workspace" : null,
             cancellationToken).ConfigureAwait(false);
 
         return saved;
+    }
+
+    /// <summary>
+    /// Whether a tool was refused specifically because the prompt data boundary forbids its content class, rather
+    /// than because it does not exist or the workspace allowlist excludes it (#83). Worth distinguishing: the
+    /// first is a compliance decision an operator may want to revisit, the second is ordinary configuration.
+    /// </summary>
+    private async Task<bool> IsBlockedByDataBoundaryAsync(ChatSession session, string toolName, CancellationToken cancellationToken)
+    {
+        var tool = toolRegistry.Resolve(toolName);
+        if (tool is null) return false;
+
+        var workspace = await workspaceRepository.GetByIdAsync(session.WorkspaceId, cancellationToken).ConfigureAwait(false);
+        if (workspace is null) return false;
+
+        var policy = await policyStore.GetPolicyAsync(session.WorkspaceId, cancellationToken).ConfigureAwait(false);
+        return !promptDataBoundary.Allows(tool.ContentClass, workspace, policy);
     }
 
     /// <summary>
