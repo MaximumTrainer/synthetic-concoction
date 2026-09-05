@@ -30,7 +30,7 @@ public sealed class PromptInjectionTests
 
     public PromptInjectionTests()
     {
-        var audit = new AuditLogService(new InMemoryAuditLogRepository());
+        var audit = new AuditLogService(new InMemoryAuditLogRepository(), new InMemoryAccountRepository());
         _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), audit);
         _toolRegistry.Register(_dangerous);
         _toolRegistry.Register(_lookup);

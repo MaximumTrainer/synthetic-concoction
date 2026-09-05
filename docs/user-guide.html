@@ -378,6 +378,21 @@ tables:
   <tr><td>Allowed Domains</td><td>Email domain allowlist for invitations.</td></tr>
   <tr><td>Audit Log</td><td>Append-only log of significant events.</td></tr>
 </table>
+<h3 id="reading-the-audit-log">Reading the audit log</h3>
+<pre><code class="language-http">GET /accounts/{accountId}/audit?page=1&amp;pageSize=50&amp;action=workspace</code></pre>
+<p>Open to any member of the account. <code>action</code> is an optional substring filter. Events come back newest first.</p>
+<h3 id="exporting-the-audit-log">Exporting the audit log</h3>
+<pre><code class="language-http">GET /accounts/{accountId}/audit/export?from=2026-01-01T00:00:00Z&amp;to=2026-09-01T00:00:00Z&amp;format=json</code></pre>
+<p><strong>Account owners only</strong> — members who can read the log through the query API cannot export it. The response is a download (<code>Content-Disposition: attachment</code>), streamed rather than buffered, so exporting a large account does not depend on it fitting in memory.</p>
+<table>
+  <tr><th>Parameter</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>from</code></td><td>none</td><td>Only events at or after this instant.</td></tr>
+  <tr><td><code>to</code></td><td>none</td><td>Only events at or before this instant.</td></tr>
+  <tr><td><code>format</code></td><td><code>json</code></td><td><code>json</code> for an array of events, <code>csv</code> for a header row plus one line per event. Anything else is a <code>400</code>.</td></tr>
+</table>
+<p>The export contains the same events the query API returns, oldest first. One difference: every event's <code>details</code> field is <strong>redacted on the way out</strong>. The log is written by many call sites, so an export — a file that leaves the building — does not assume all of them got redaction right. Values are replaced with <code>[redacted]</code> wherever the key names something sensitive (<code>secret</code>, <code>password</code>, <code>token</code>, <code>apiKey</code>, <code>credential</code>, <code>fingerprint</code>, connection strings), and known provider key shapes are stripped even when they appear without a key name. Credential fingerprints are included deliberately: a fingerprint identifies a live key, and correlating one across accounts says which tenants share it. Non-sensitive detail — provider names, model names, target ids — survives, or the export would not be worth having.</p>
+<p>Redaction applies to the export only. The stored event is left as written, because rewriting history in place to hide a mistake is worse than the mistake.</p>
+<p>Operators can cap how long events are kept; see <a href="how-to/self-hosting.html#audit-retention">Audit retention</a>. Retention is off by default.</p>
 
 <h2 id="chat">11. Agent Chat</h2>
 <p>Chat sessions let you interact with Fabricate via natural language. Sessions are created per workspace. Each turn is answered by the model the workspace is configured to use — a credential the workspace registered itself (<a href="how-to/byok-llm-credentials.html">bring your own key</a>) or, where allowed, the operator's platform credential (<a href="how-to/self-hosting.html">self-hosting</a>). Fabricate ships with no model credential of its own.</p>

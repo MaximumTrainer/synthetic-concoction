@@ -265,6 +265,24 @@ public interface IAuditLogService
 {
     Task RecordAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default);
     Task<AuditPage> QueryAsync(Guid accountId, int page = 1, int pageSize = 50, string? actionFilter = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams one account's events, oldest first, for export. Only account owners may export (#74), and every
+    /// event's <see cref="AuditEvent.Details"/> is redacted on the way out — the log is written by many call
+    /// sites, so the export must not trust that none of them recorded something sensitive.
+    /// </summary>
+    IAsyncEnumerable<AuditEvent> ExportAsync(
+        Guid accountId,
+        Guid requestingUserId,
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes events older than the configured window across every account, in batches. Returns the number
+    /// removed; zero when retention is disabled. The purge audits itself as <c>audit.retention_applied</c>.
+    /// </summary>
+    Task<int> ApplyRetentionAsync(CancellationToken cancellationToken = default);
 }
 
 public interface IAuditLogRepository
@@ -272,6 +290,19 @@ public interface IAuditLogRepository
     Task AppendAsync(AuditEvent auditEvent, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AuditEvent>> QueryAsync(Guid accountId, int skip, int take, string? actionFilter, CancellationToken cancellationToken = default);
     Task<int> CountAsync(Guid accountId, string? actionFilter, CancellationToken cancellationToken = default);
+
+    /// <summary>One account's events in a window, oldest first. Streamed so an export never buffers the log.</summary>
+    IAsyncEnumerable<AuditEvent> StreamAsync(
+        Guid accountId,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes events strictly older than <paramref name="cutoff"/>, at most <paramref name="batchSize"/> per
+    /// statement so a large backlog does not hold a long write lock. Returns the number deleted.
+    /// </summary>
+    Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken = default);
 }
 
 // ── #28: Workspace ports ──────────────────────────────────────────────────────

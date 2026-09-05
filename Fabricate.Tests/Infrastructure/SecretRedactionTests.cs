@@ -33,6 +33,7 @@ public sealed class SecretRedactionTests
         var services = new ServiceCollection();
         services.AddLogging(b => b.AddProvider(logs).SetMinimumLevel(LogLevel.Trace));
         services.AddSingleton<IAuditLogRepository>(audit);
+        services.AddSingleton<IAccountRepository, InMemoryAccountRepository>();
         services.AddSingleton<IAuditLogService, AuditLogService>();
         services.AddSingleton<IWorkspaceRepository, InMemoryWorkspaceRepository>();
         services.AddSingleton<IAccountGroupRepository, InMemoryAccountGroupRepository>();

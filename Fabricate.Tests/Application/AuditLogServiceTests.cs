@@ -9,11 +9,12 @@ namespace Fabricate.Tests.Application;
 public sealed class AuditLogServiceTests
 {
     private readonly InMemoryAuditLogRepository _repo = new();
+    private readonly InMemoryAccountRepository _accountRepo = new();
     private readonly AuditLogService _service;
 
     public AuditLogServiceTests()
     {
-        _service = new AuditLogService(_repo);
+        _service = new AuditLogService(_repo, _accountRepo);
     }
 
     [Fact]

@@ -100,6 +100,10 @@ public class FabricateDbContext(DbContextOptions options) : DbContext(options)
             e.Property(a => a.CorrelationId).IsRequired().HasMaxLength(100);
             e.Property(a => a.TargetType).HasMaxLength(100);
             e.Property(a => a.TargetId).HasMaxLength(100);
+
+            // Retention sweeps by date across every account, and export reads one account in date order (#74).
+            e.HasIndex(a => a.OccurredAt);
+            e.HasIndex(a => new { a.AccountId, a.OccurredAt });
         });
 
         // DatasetRun — store JSON collections as strings

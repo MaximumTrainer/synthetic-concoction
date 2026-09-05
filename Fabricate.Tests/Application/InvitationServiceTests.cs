@@ -18,7 +18,7 @@ public sealed class InvitationServiceTests
 
     public InvitationServiceTests()
     {
-        _auditLogService = new AuditLogService(_auditLogRepo);
+        _auditLogService = new AuditLogService(_auditLogRepo, _accountRepo);
         _allowedDomainService = new AllowedDomainService(new InMemoryAllowedDomainRepository(), _accountRepo, _auditLogService);
         _service = new InvitationService(_userRepo, _accountRepo, _allowedDomainService, _auditLogService);
     }

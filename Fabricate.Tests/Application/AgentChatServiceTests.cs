@@ -21,7 +21,7 @@ public sealed class AgentChatServiceTests
 
     public AgentChatServiceTests()
     {
-        _auditLogService = new AuditLogService(_auditLogRepo);
+        _auditLogService = new AuditLogService(_auditLogRepo, new InMemoryAccountRepository());
         _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), _auditLogService);
         _instructionService = new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService);
         _chatService = new AgentChatService(

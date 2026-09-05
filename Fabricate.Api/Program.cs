@@ -1,6 +1,7 @@
 using Fabricate.Api;
 using Fabricate.Api.Authentication;
 using Fabricate.Api.Routes;
+using Fabricate.Application.Governance;
 using Fabricate.Application.Llm;
 using Fabricate.Infrastructure.DependencyInjection;
 using Fabricate.Infrastructure.Persistence;
@@ -111,7 +112,12 @@ if (!dbProvider.Equals("memory", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddFabricatePersistence(dbProvider, connStr);
 }
 
+// Audit retention (#74): FABRICATE_AUDIT_RETENTION_DAYS defaults to 0, meaning events are kept indefinitely.
+var auditRetention = AuditRetentionOptions.FromEnvironment(Environment.GetEnvironmentVariable);
+builder.Services.AddSingleton(auditRetention);
+
 builder.Services.AddHostedService<StartupBootstrapService>();
+builder.Services.AddHostedService<AuditRetentionService>();
 
 var app = builder.Build();
 
@@ -149,6 +155,7 @@ app.MapChatRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies
 app.MapLlmCredentialRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
 app.MapApiKeyRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
 app.MapWebhookRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
+app.MapAuditRoutes().RequireAuthorization().RequireRateLimiting(RateLimitPolicies.Api);
 
 app.Run();
 

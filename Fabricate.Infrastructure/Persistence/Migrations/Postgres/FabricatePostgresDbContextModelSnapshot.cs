@@ -185,6 +185,10 @@ namespace Fabricate.Infrastructure.Persistence.Migrations.Postgres
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OccurredAt");
+
+                    b.HasIndex("AccountId", "OccurredAt");
+
                     b.ToTable("AuditEvents");
                 });
 

@@ -645,6 +645,45 @@ Account-level governance controls:
 | **Allowed Domains** | Allowlist of email domains for invitations. |
 | **Audit Log** | Append-only log of significant events (account/workspace/project changes, key operations). |
 
+#### Reading the audit log
+
+```http
+GET /accounts/{accountId}/audit?page=1&pageSize=50&action=workspace
+```
+
+Open to any member of the account. `action` is an optional substring filter. Events come back newest first.
+
+#### Exporting the audit log
+
+```http
+GET /accounts/{accountId}/audit/export?from=2026-01-01T00:00:00Z&to=2026-09-01T00:00:00Z&format=json
+```
+
+**Account owners only** — members who can read the log through the query API cannot export it. The response is a
+download (`Content-Disposition: attachment`), streamed rather than buffered, so exporting a large account does not
+depend on it fitting in memory.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `from` | none | Only events at or after this instant. |
+| `to` | none | Only events at or before this instant. |
+| `format` | `json` | `json` for an array of events, `csv` for a header row plus one line per event. Anything else is a `400`. |
+
+The export contains the same events the query API returns, oldest first. One difference: every event's `details`
+field is **redacted on the way out**. The log is written by many call sites, so an export — a file that leaves the
+building — does not assume all of them got redaction right. Values are replaced with `[redacted]` wherever the key
+names something sensitive (`secret`, `password`, `token`, `apiKey`, `credential`, `fingerprint`, connection
+strings), and known provider key shapes are stripped even when they appear without a key name. Credential
+fingerprints are included deliberately: a fingerprint identifies a live key, and correlating one across accounts
+says which tenants share it. Non-sensitive detail — provider names, model names, target ids — survives, or the
+export would not be worth having.
+
+Redaction applies to the export only. The stored event is left as written, because rewriting history in place to
+hide a mistake is worse than the mistake.
+
+Operators can cap how long events are kept; see
+[Audit retention](how-to/self-hosting.md#audit-retention). Retention is off by default.
+
 ---
 
 ## Agent Chat

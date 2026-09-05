@@ -20,6 +20,28 @@ Everything is configured by environment variables, so the same image runs unchan
 | `ASPNETCORE_URLS` | no | Defaults to `http://+:8080` in the image. TLS is terminated by your platform. |
 | `FABRICATE_API_RATE_LIMIT_PER_MINUTE` | no | Requests per minute per API key across every authenticated route (default 100). `/healthz` and Swagger are exempt. Exceeding it returns `429` with `Retry-After`. |
 | `FABRICATE_ARTIFACTS_PATH` | no | Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart. Object storage is a tracked follow-up. |
+| `FABRICATE_AUDIT_RETENTION_DAYS` | no | Days of audit history to keep. **Default `0` keeps everything**, so an existing deployment never starts deleting on upgrade. Set it and a background sweep purges anything older; see [Audit retention](#audit-retention). |
+| `FABRICATE_AUDIT_SWEEP_MINUTES` | no | How often the retention sweep runs (default 360, six hours). Only read when retention is enabled. |
+| `FABRICATE_AUDIT_PURGE_BATCH_SIZE` | no | Rows deleted per statement (default 1000), so clearing a long backlog does not hold one long write lock. |
+
+### Audit retention
+
+Audit events are insert-only and otherwise grow forever, which on a hosted deployment eventually costs more than
+the log is worth. Retention is **off by default**: `FABRICATE_AUDIT_RETENTION_DAYS=0` keeps every event.
+
+Setting it to a positive number starts a background sweep that deletes events strictly older than the window,
+across every account, in batches. An event exactly on the boundary is kept. The sweep audits itself as
+`audit.retention_applied`, recording the window, the cutoff and the number removed — and records nothing when it
+deleted nothing, so an idle sweep does not become its own source of growth.
+
+```bash
+FABRICATE_AUDIT_RETENTION_DAYS=90    # keep a quarter of history
+FABRICATE_AUDIT_SWEEP_MINUTES=360    # sweep every six hours (the default)
+```
+
+Deleting audit history may itself be regulated in your jurisdiction. Export before you shorten a window — see
+[Exporting the audit log](../user-guide.md#exporting-the-audit-log) — and keep the export somewhere the retention
+window does not reach.
 
 Pending EF Core migrations are applied automatically at startup, so a fresh database needs no manual step. Several
 instances starting at once apply the schema exactly once (EF Core's migration lock).

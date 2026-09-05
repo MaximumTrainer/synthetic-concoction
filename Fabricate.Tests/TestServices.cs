@@ -25,7 +25,7 @@ public sealed class TestServices
 
     public TestServices()
     {
-        AuditLogService = new AuditLogService(AuditLogRepository);
+        AuditLogService = new AuditLogService(AuditLogRepository, AccountRepository);
         WorkspaceService = new WorkspaceService(WorkspaceRepository, AccountGroupRepository, AuditLogService);
         InstructionVersionService = new InstructionVersionService(InstructionRepository, WorkspaceService);
     }

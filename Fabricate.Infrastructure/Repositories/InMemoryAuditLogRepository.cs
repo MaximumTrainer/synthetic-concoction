@@ -38,4 +38,36 @@ public sealed class InMemoryAuditLogRepository : IAuditLogRepository
 
         return Task.FromResult(query.Count());
     }
+
+    public async IAsyncEnumerable<AuditEvent> StreamAsync(
+        Guid accountId,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // Snapshot before yielding: an append during the enumeration must not disturb it.
+        var window = _events
+            .Where(e => e.AccountId == accountId)
+            .Where(e => (from is null || e.OccurredAt >= from) && (to is null || e.OccurredAt <= to))
+            .OrderBy(e => e.OccurredAt)
+            .ToArray();
+
+        foreach (var auditEvent in window)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return auditEvent;
+            await Task.Yield();
+        }
+    }
+
+    public Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken = default)
+    {
+        var doomed = _events.Where(e => e.OccurredAt < cutoff).Take(batchSize).ToArray();
+        foreach (var auditEvent in doomed)
+        {
+            _events.Remove(auditEvent);
+        }
+
+        return Task.FromResult(doomed.Length);
+    }
 }

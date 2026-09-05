@@ -24,6 +24,7 @@ using Fabricate.Infrastructure.Schema;
 using Fabricate.Infrastructure.Webhooks;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Fabricate.Infrastructure.DependencyInjection;
 
@@ -68,6 +69,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAccountGroupService, AccountGroupService>();
         services.AddScoped<IAllowedDomainService, AllowedDomainService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
+        // Retention defaults to "keep everything" (#74); the host overrides this from the environment.
+        services.TryAddSingleton(new AuditRetentionOptions());
+        services.TryAddSingleton(TimeProvider.System);
 
         // #28 — workspaces
         services.AddScoped<IWorkspaceService, WorkspaceService>();

@@ -26,7 +26,7 @@ public sealed class AgentChatTurnTests
 
     public AgentChatTurnTests()
     {
-        var audit = new AuditLogService(new InMemoryAuditLogRepository());
+        var audit = new AuditLogService(new InMemoryAuditLogRepository(), new InMemoryAccountRepository());
         _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), audit);
         _instructionService = new InstructionVersionService(new InMemoryInstructionVersionRepository(), _workspaceService);
         _toolRegistry.Register(_echoTool);

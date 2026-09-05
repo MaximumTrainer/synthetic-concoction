@@ -22,7 +22,7 @@ public sealed class LlmCredentialServiceTests
 
     public LlmCredentialServiceTests()
     {
-        var audit = new AuditLogService(_auditRepo);
+        var audit = new AuditLogService(_auditRepo, new InMemoryAccountRepository());
         _workspaceService = new WorkspaceService(new InMemoryWorkspaceRepository(), new InMemoryAccountGroupRepository(), audit);
         _service = new LlmCredentialService(_store, _cipher, _workspaceService, audit, _probe, _options);
     }
