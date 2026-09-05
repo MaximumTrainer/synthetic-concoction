@@ -31,7 +31,7 @@ public static class WebhookRoutes
         {
             var userId = ctx.GetUserId();
             var webhooks = await webhookService.ListAsync(workspaceId, userId, ct).ConfigureAwait(false);
-            return Results.Ok(webhooks);
+            return Results.Ok(webhooks.Select(WebhookSummary.From).ToArray());
         }).WithName("ListWebhooks");
 
         group.MapGet("/{webhookId:guid}", async (
@@ -43,7 +43,7 @@ public static class WebhookRoutes
         {
             var userId = ctx.GetUserId();
             var webhook = await webhookService.GetAsync(webhookId, userId, ct).ConfigureAwait(false);
-            return webhook is null ? Results.NotFound() : Results.Ok(webhook);
+            return webhook is null ? Results.NotFound() : Results.Ok(WebhookSummary.From(webhook));
         }).WithName("GetWebhook");
 
         group.MapDelete("/{webhookId:guid}", async (
@@ -59,6 +59,29 @@ public static class WebhookRoutes
         }).WithName("DeleteWebhook");
 
         return group;
+    }
+}
+
+/// <summary>
+/// The webhook projection reads return (#89). <c>SigningSecret</c> is the shared secret a receiver verifies
+/// signatures with; it is echoed once by registration, to the caller who supplied or requested it, and never
+/// again. Listing every workspace webhook must not hand out the secrets along with them.
+/// </summary>
+public sealed record WebhookSummary(
+    Guid Id,
+    Guid WorkspaceId,
+    string Url,
+    IReadOnlyList<string> Events,
+    bool HasSigningSecret,
+    bool IsActive,
+    DateTimeOffset CreatedAt)
+{
+    public static WebhookSummary From(WebhookRegistration webhook)
+    {
+        ArgumentNullException.ThrowIfNull(webhook);
+        return new WebhookSummary(
+            webhook.Id, webhook.WorkspaceId, webhook.Url, webhook.Events,
+            !string.IsNullOrEmpty(webhook.SigningSecret), webhook.IsActive, webhook.CreatedAt);
     }
 }
 

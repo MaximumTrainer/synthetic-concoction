@@ -131,7 +131,7 @@ test("API keys live under the account and revoke is a DELETE", async () => {
   };
   const { client, calls, trace } = recorder((req) =>
     req.method === "POST"
-      ? { id: "k1", name: "ci", secret: "cnc_plaintext", scopes: ["read", "write"], expiresAt: null }
+      ? { id: "k1", name: "ci", plaintextSecret: "cnc_plaintext", scopes: ["read", "write"], expiresAt: null }
       : key
   );
 
@@ -147,7 +147,7 @@ test("API keys live under the account and revoke is a DELETE", async () => {
 
   // The API binds a TimeSpan lifetime, not an instant.
   assert.deepEqual(calls[0].body, { name: "ci", scopes: ["read", "write"], expiry: "30.00:00:00" });
-  assert.equal(created.secret, "cnc_plaintext", "the plaintext secret is returned flat, not nested under `key`");
+  assert.equal(created.plaintextSecret, "cnc_plaintext", "the plaintext is returned flat, not nested under `key`");
   assert.equal(revoked.isRevoked, true);
 });
 

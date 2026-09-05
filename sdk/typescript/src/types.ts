@@ -86,8 +86,8 @@ export interface ApiKey {
 export interface ApiKeyCreateResult {
   id: string;
   name: string;
-  /** Plaintext secret — shown only once. */
-  secret: string;
+  /** Plaintext secret — shown only once, at creation. */
+  plaintextSecret: string;
   scopes: string[];
   expiresAt: string | null;
 }
