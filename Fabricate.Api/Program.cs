@@ -139,18 +139,50 @@ app.MapOpenApi();
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// Health probe — no authentication required. Reports LLM configuration state without any value from it.
-app.MapGet("/healthz", (LlmOptions llm) => Results.Ok(new
+// Health probe — no authentication required. Reports component state without any value from any of them.
+//
+// The database is the one dependency whose absence makes the instance unserviceable: every authenticated route
+// reads through it, so an instance that cannot reach it should be taken out of rotation rather than left to
+// return 500s. It therefore answers 503 (#61). A missing or misconfigured LLM credential is not the same thing —
+// the whole non-LLM API still works — so that is reported and stays 200.
+app.MapGet("/healthz", async (LlmOptions llm, IServiceProvider services, CancellationToken cancellationToken) =>
 {
-    status = "healthy",
-    llm = new
+    await using var scope = services.CreateAsyncScope();
+    var database = scope.ServiceProvider.GetService<FabricateDbContext>();
+
+    var databaseState = "not configured";
+    if (database is not null)
     {
-        platformCredential = llm.IsPlatformCredentialConfigured ? "configured" : "disabled",
-        provider = llm.Provider,
-        model = llm.Model,
-        platformFallback = llm.PlatformFallback.ToString(),
-    },
-}))
+        try
+        {
+            // A probe, not a query: CanConnectAsync opens and drops a connection and touches no table. The
+            // health check runs on an interval, so it must stay cheap.
+            using var probe = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            probe.CancelAfter(TimeSpan.FromSeconds(3));
+            databaseState = await database.Database.CanConnectAsync(probe.Token) ? "reachable" : "unreachable";
+        }
+        catch (Exception)
+        {
+            // The reason is in the logs; the probe body carries no connection string and no exception text.
+            databaseState = "unreachable";
+        }
+    }
+
+    var body = new
+    {
+        status = databaseState == "unreachable" ? "unhealthy" : "healthy",
+        database = databaseState,
+        llm = new
+        {
+            platformCredential = llm.IsPlatformCredentialConfigured ? "configured" : "disabled",
+            provider = llm.Provider,
+            model = llm.Model,
+            platformFallback = llm.PlatformFallback.ToString(),
+        },
+    };
+
+    return databaseState == "unreachable" ? Results.Json(body, statusCode: 503) : Results.Ok(body);
+})
    .AllowAnonymous()
    .WithName("Healthz")
    .WithTags("Health");

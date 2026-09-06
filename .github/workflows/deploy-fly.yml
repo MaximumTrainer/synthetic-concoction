@@ -61,6 +61,9 @@ jobs:
     env:
       SMOKE_API_BASE_URL: https://${{ needs.deploy.outputs.hostname }}
       SMOKE_API_KEY: ${{ secrets.SMOKE_API_KEY }}
+      # Turns the suite's self-skip into a failure. The protection lives in the test fixture, not here, so it
+      # cannot be lost by editing this file (#61).
+      SMOKE_REQUIRE_EXECUTION: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -92,9 +95,10 @@ jobs:
           dotnet test Fabricate.Tests.Smoke/Fabricate.Tests.Smoke.csproj -c Release --no-build
           --logger "trx;LogFileName=smoke.trx" --results-directory "$RUNNER_TEMP/results"
 
-      # The smoke tests return early (and "pass") when their gates are unset. Assert that they actually executed
-      # by requiring every test to have taken measurable time and by checking the run was not empty.
-      - name: Assert the smoke tests executed rather than skipped
+      # This catches an *empty* run — no tests discovered, or a build that produced none. It does not catch a
+      # self-skipping test, which the runner records as both executed and passed; SMOKE_REQUIRE_EXECUTION above
+      # is what catches that, by making the skip throw. Both are needed, and neither substitutes for the other.
+      - name: Assert the smoke run was not empty
         run: |
           trx=$(ls "$RUNNER_TEMP"/results/*.trx | head -1)
           total=$(grep -o 'total="[0-9]*"' "$trx" | head -1 | grep -o '[0-9]*')

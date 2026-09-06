@@ -358,9 +358,26 @@ the lowest-cost option. Check Fly's current pricing page for figures — they ch
 
 ## Health and readiness
 
-`GET /healthz` (unauthenticated) reports `status` and an `llm` block — whether the platform credential is configured,
-its provider and model, and the fallback mode. It never includes a secret or the resolved connection string. A missing
-LLM credential does not fail health: the rest of the API does not depend on a model.
+`GET /healthz` (unauthenticated) reports `status`, a `database` state and an `llm` block. It never includes a
+secret, a connection string or an exception message — the reason for a failure is in the logs, not in a response
+anyone can fetch.
+
+The two dependencies are treated differently, because they fail differently:
+
+| Dependency | State | Status |
+| --- | --- | --- |
+| Database unreachable | `unreachable` | **503** — every authenticated route reads through it, so the instance is taken out of rotation rather than left answering 500s |
+| No database configured | `not configured` | 200 — the in-memory repositories are a legitimate local configuration |
+| LLM credential missing or misconfigured | `disabled` | 200 — the rest of the API does not depend on a model |
+
+The database probe opens and drops a connection and touches no table, with a three-second budget, so it stays
+cheap enough to run on the platform's health-check interval.
+
+**A database that is missing at startup is a different case.** Migrations run before the app serves traffic, so
+the process fails to start rather than coming up unhealthy, and the platform restarts it. That is deliberate: an
+instance with no schema cannot serve anything, and a crash loop is a clearer signal than a machine that is up and
+broken. The readiness signal above is for the other failure — a database that was reachable and went away while
+the process kept running, which is otherwise invisible.
 
 ## Backups
 

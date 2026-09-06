@@ -26,10 +26,26 @@ primary_region = "lhr"
   # A single-operator instance: every workspace may use the platform credential.
   FABRICATE_LLM_PLATFORM_FALLBACK = "always"
   FABRICATE_LLM_TIMEOUT_SECONDS = "120"
-  # Data Protection key ring for encrypting tenant LLM credentials. Ephemeral disk: rotating this path loses the
-  # ability to decrypt stored BYOK credentials, so for multi-machine or long-lived deployments move the key ring to
-  # shared storage (see docs) before enabling per-workspace credentials.
-  FABRICATE_DATA_PROTECTION_KEYS_PATH = "/app/keys"
+  # Data Protection key ring, in the database rather than on disk (#76). A Fly machine's filesystem does not
+  # survive replacement and is not shared between machines, so the previous file-system path lost the ability to
+  # decrypt every stored tenant credential the first time a machine was replaced — permanently, with the
+  # ciphertext still sitting in PostgreSQL. The database store is what makes scale-to-zero and `fly scale count`
+  # safe for per-workspace credentials.
+  FABRICATE_DATA_PROTECTION_KEY_STORE = "database"
+  # Wrap the ring with a KMS key and this line goes away — see the self-hosting guide. Without a key-encryption
+  # key the ring sits in the same database as the secrets it protects, so one dump decrypts both; that is still a
+  # better position than losing the ring on every deploy, but it is a trade-off and it is stated rather than
+  # assumed. After configuring a KEK, run `fabricate secrets rewrap` once: enabling it does not reach back over
+  # entries already written.
+  FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED = "true"
+
+  # Generated artifacts (#84, #90). The default is the OS temp directory, which on Fly is ephemeral, so a
+  # completed run ends up pointing at files that no longer exist. Uncomment and set the bucket to keep them:
+  # FABRICATE_ARTIFACT_STORE = "s3"
+  # FABRICATE_ARTIFACT_BUCKET = "fabricate-artifacts"
+  # FABRICATE_ARTIFACT_S3_ENDPOINT = "https://<account>.r2.cloudflarestorage.com"
+  # FABRICATE_ARTIFACT_S3_REGION = "auto"
+  # FABRICATE_ARTIFACT_S3_FORCE_PATH_STYLE = "true"
 
 [http_service]
   internal_port = 8080

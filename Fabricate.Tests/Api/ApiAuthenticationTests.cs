@@ -143,5 +143,18 @@ public sealed class ApiAuthenticationTests : IDisposable
         body.Should().NotContain("sk-").And.NotContain(FabricateApiFactory.BootstrapApiKey);
     }
 
+    [Fact]
+    public async Task Health_ReportsTheDatabaseWhenItIsReachable()
+    {
+        using var client = _factory.CreateClient();
+
+        var body = await client.GetStringAsync("/healthz");
+
+        // The default factory runs the in-memory repositories, which is a legitimate configuration rather than a
+        // fault: there is no database to be unreachable.
+        body.Should().Contain("database").And.Contain("not configured");
+        body.Should().Contain("healthy");
+    }
+
     private sealed record CreatedKey(Guid Id, string Name, string PlaintextSecret);
 }
