@@ -4,7 +4,9 @@ using Fabricate.Application.Abstractions;
 using Fabricate.Domain.Enums;
 using Fabricate.Domain.Models;
 using Fabricate.Infrastructure.Configuration;
+using Fabricate.Application.Llm;
 using Fabricate.Infrastructure.DependencyInjection;
+using Fabricate.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -240,6 +242,44 @@ discoverProfile.SetHandler(async (provider, connection, database, seed) =>
         Environment.ExitCode = 1;
     }
 }, providerOption, connectionOption, dbNameOption, seedOption);
+
+// #76 — re-protects an existing Data Protection key ring under whatever protection is configured now. Needed
+// because Data Protection encrypts on write and never revisits stored entries: an operator who enables a
+// key-encryption key protects only newly created ring entries, and the existing ones stay in the clear while
+// the configuration says otherwise.
+var secrets = new Command("secrets", "Operator commands for stored secrets");
+
+var rewrap = new Command("rewrap",
+    "Re-protect the Data Protection key ring under the currently configured key. Idempotent.");
+
+rewrap.SetHandler(async () =>
+{
+    var dbProvider = Environment.GetEnvironmentVariable("FABRICATE_DB_PROVIDER") ?? "memory";
+    var connection = Environment.GetEnvironmentVariable("FABRICATE_CONNECTION_STRING");
+
+    if (dbProvider.Equals("memory", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(connection))
+    {
+        Console.Error.WriteLine(
+            "Rewrapping needs the database the key ring lives in. Set FABRICATE_DB_PROVIDER and " +
+            "FABRICATE_CONNECTION_STRING to the same values the API runs with.");
+        Environment.ExitCode = 1;
+        return;
+    }
+
+    var services = new ServiceCollection();
+    services.AddLogging();
+    services.AddFabricatePersistence(dbProvider, connection);
+    services.AddFabricateLlm(LlmOptions.FromEnvironment(Environment.GetEnvironmentVariable),
+        KeyRingOptions.FromEnvironment(Environment.GetEnvironmentVariable));
+
+    await using var provider = services.BuildServiceProvider();
+
+    var report = await provider.GetRequiredService<KeyRingRewrapService>().RewrapAsync();
+    Console.WriteLine(report);
+});
+
+secrets.AddCommand(rewrap);
+root.AddCommand(secrets);
 
 root.AddCommand(discover);
 root.AddCommand(discoverProfile);

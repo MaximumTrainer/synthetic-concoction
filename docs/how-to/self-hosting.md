@@ -284,6 +284,19 @@ countdown.
 
 The table is created by the standard migrations, so no manual step is needed when switching.
 
+**Turning a KEK on does not reach back over the ring you already have.** Data Protection encrypts on write and
+never revisits stored entries, so enabling `FABRICATE_DATA_PROTECTION_KEK` protects newly created entries only —
+the existing ones stay in the clear while the configuration says the ring is wrapped. Run the rewrap once, with
+the same environment the API uses:
+
+```bash
+FABRICATE_DB_PROVIDER=postgres FABRICATE_CONNECTION_STRING="..." FABRICATE_DATA_PROTECTION_KEY_STORE=database FABRICATE_DATA_PROTECTION_KEK=aws-kms FABRICATE_DATA_PROTECTION_KMS_KEY_ID=alias/fabricate-keyring   fabricate secrets rewrap
+```
+
+It re-protects the ring without touching tenant ciphertext, so nothing needs re-encrypting and there is no
+half-migrated state. It is idempotent — running it on an already-wrapped ring reports that there was nothing to
+do — and safe to run while the API is up.
+
 ## Alternatives
 
 - **Render** — `render.yaml` at the repository root is a Blueprint: a Docker web service plus a managed PostgreSQL,

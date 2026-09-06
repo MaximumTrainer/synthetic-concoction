@@ -346,6 +346,10 @@ public static class ServiceCollectionExtensions
 
         services.AddHttpClient(ChatCompletionClientFactory.HttpClientName);
 
+        // #76 — re-protects an existing ring under whatever protection is configured now. Registered always:
+        // it is equally the command that reports "nothing to do" on a correctly configured instance.
+        services.TryAddSingleton<KeyRingRewrapService>();
+
         services.AddSingleton<ISecretCipher, DataProtectionSecretCipher>();
         services.AddSingleton<ILlmCredentialStore, InMemoryLlmCredentialStore>();
 

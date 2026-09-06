@@ -172,6 +172,9 @@ FABRICATE_DATA_PROTECTION_KMS_REGION=eu-west-1</code></pre>
 FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED=true</code></pre>
 <p>In order of strength: <code>database</code> with a KEK, then <code>filesystem</code> on a mounted volume, then <code>database</code> unwrapped. The file-system store on an ephemeral disk is not on the list because it is not a configuration, it is a countdown.</p>
 <p>The table is created by the standard migrations, so no manual step is needed when switching.</p>
+<p><strong>Turning a KEK on does not reach back over the ring you already have.</strong> Data Protection encrypts on write and never revisits stored entries, so enabling <code>FABRICATE_DATA_PROTECTION_KEK</code> protects newly created entries only — the existing ones stay in the clear while the configuration says the ring is wrapped. Run the rewrap once, with the same environment the API uses:</p>
+<pre><code class="language-bash">FABRICATE_DB_PROVIDER=postgres FABRICATE_CONNECTION_STRING="..." FABRICATE_DATA_PROTECTION_KEY_STORE=database FABRICATE_DATA_PROTECTION_KEK=aws-kms FABRICATE_DATA_PROTECTION_KMS_KEY_ID=alias/fabricate-keyring   fabricate secrets rewrap</code></pre>
+<p>It re-protects the ring without touching tenant ciphertext, so nothing needs re-encrypting and there is no half-migrated state. It is idempotent — running it on an already-wrapped ring reports that there was nothing to do — and safe to run while the API is up.</p>
 <h2 id="alternatives">Alternatives</h2>
 <ul><li><strong>Render</strong> — <code>render.yaml</code> at the repository root is a Blueprint: a Docker web service plus a managed PostgreSQL,</li></ul>
 <p>with secrets prompted in the dashboard.</p>

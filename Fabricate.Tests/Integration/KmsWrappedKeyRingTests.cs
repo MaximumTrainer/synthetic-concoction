@@ -127,6 +127,80 @@ public sealed class KmsWrappedKeyRingTests(KmsKeyRingFixture fixture, ITestOutpu
             "a stolen database is useless without the KMS access needed to unwrap its key ring");
     }
 
+    // ── rewrap ───────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The trap the rewrap command exists to close. Data Protection encrypts on write and never revisits what it
+    /// has already stored, so an operator who runs unwrapped and later configures a KEK protects only newly
+    /// created ring entries. The old ones stay in the clear while the configuration says the ring is wrapped —
+    /// and enabling the KEK looks like it worked, which is what makes it dangerous.
+    /// </summary>
+    [Fact]
+    public async Task EnablingAKekLeavesExistingRingEntriesUnprotectedUntilRewrapped()
+    {
+        if (!fixture.Ready) return;
+        await using var schema = await fixture.MigrateAsync();
+
+        // An instance that ran before anyone configured a KEK.
+        string cipherText, keyVersion;
+        using (var unwrapped = BuildInstance(new KeyRingOptions
+               {
+                   KeyStore = "database",
+                   AllowUnwrappedDatabaseKeyRing = true,
+               }))
+        {
+            (cipherText, keyVersion) = Cipher(unwrapped).Encrypt(Secret);
+        }
+
+        (await StoredRingXml()).Should().Contain("<masterKey",
+            "this is the state the rewrap command exists to correct");
+
+        // The KEK is now configured. On its own that changes nothing about what is already stored.
+        using var wrapped = BuildInstance(WrappedRing());
+
+        (await StoredRingXml()).Should().Contain("<masterKey",
+            "Data Protection encrypts on write, so configuring a KEK does not reach back over the existing ring");
+
+        var report = await wrapped.GetRequiredService<KeyRingRewrapService>().RewrapAsync();
+
+        report.Rewrapped.Should().BeGreaterThan(0);
+        var afterwards = await StoredRingXml();
+        afterwards.Should().NotContain("<masterKey", "every entry is now wrapped");
+        afterwards.Should().NotContain("unencrypted form",
+            "Data Protection writes that warning into the row itself when a key is stored in the clear");
+        afterwards.Should().Contain("wrappedKey");
+
+        // The whole point: the secret written before the rewrap is still readable after it.
+        using var afterRewrap = BuildInstance(WrappedRing());
+        Cipher(afterRewrap).Decrypt(cipherText, keyVersion).Should().Be(Secret,
+            "a rewrap re-protects the ring without invalidating anything encrypted under it");
+    }
+
+    /// <summary>Running it twice must not re-encrypt what is already current, or it would churn the ring forever.</summary>
+    [Fact]
+    public async Task RewrappingAnAlreadyWrappedRingChangesNothing()
+    {
+        if (!fixture.Ready) return;
+        await using var schema = await fixture.MigrateAsync();
+
+        using var instance = BuildInstance(WrappedRing());
+        Cipher(instance).Encrypt(Secret);
+
+        var service = instance.GetRequiredService<KeyRingRewrapService>();
+        await service.RewrapAsync();
+        var second = await service.RewrapAsync();
+
+        second.Rewrapped.Should().Be(0, "the entries are already protected by the configured key");
+        second.AlreadyCurrent.Should().Be(second.Total);
+    }
+
+    private async Task<string> StoredRingXml()
+    {
+        await using var context = fixture.NewContext();
+        var rows = await context.DataProtectionKeys.ToListAsync();
+        return string.Join(Environment.NewLine, rows.Select(r => r.Xml));
+    }
+
     /// <summary>A configured KEK lifts the acknowledgement, because it removes the thing being acknowledged.</summary>
     [Fact]
     public void AConfiguredKekRemovesTheNeedToAcknowledgeAnUnwrappedRing()
