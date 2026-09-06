@@ -9,17 +9,19 @@ services:
   api:
     build: .
     ports:
-      - "8080:8080"
+      # Host port is configurable because 8080 is commonly already taken; the container port is fixed.
+      - "${FABRICATE_HOST_PORT:-8080}:8080"
     env_file:
       - .env
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       FABRICATE_DB_PROVIDER: postgres
       FABRICATE_CONNECTION_STRING: "Host=db;Port=5432;Database=fabricate;Username=fabricate;Password=${POSTGRES_PASSWORD:-fabricate}"
-      FABRICATE_DATA_PROTECTION_KEYS_PATH: /app/keys
-    volumes:
-      # Data Protection key ring: losing it means stored per-workspace LLM credentials can no longer be decrypted.
-      - fabricate-keys:/app/keys
+      # Data Protection key ring in the database, matching fly.toml (#76). This file exists to be the same shape
+      # as the hosted deployment, and a key ring on a container filesystem is the one place it used to differ:
+      # there it is lost with the machine, taking the ability to decrypt every stored credential with it.
+      FABRICATE_DATA_PROTECTION_KEY_STORE: database
+      FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED: "true"
     depends_on:
       db:
         condition: service_healthy
@@ -42,4 +44,3 @@ services:
 
 volumes:
   fabricate-db:
-  fabricate-keys:

@@ -6,3 +6,10 @@
 TestResults/
 artifacts/
 .copilot-specs-cache/
+
+# Local secrets. docker-compose.yml tells operators to `cp .env.example .env` and put their LLM key and
+# bootstrap key in it, so the working copy of this file is a credential store. .env.example is the template
+# and stays tracked.
+.env
+.env.*
+!.env.example
