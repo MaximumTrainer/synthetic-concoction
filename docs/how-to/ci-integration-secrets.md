@@ -38,8 +38,8 @@ dotnet test --filter "FullyQualifiedName~PostgreSql"
 
 ## Azure Cosmos DB (issue #53)
 
-Cosmos has an emulator, but it is a multi-gigabyte image that takes minutes to become healthy, so it is opt-in
-rather than part of every push:
+Cosmos has an emulator, and the suite uses the `vnext-preview` image, which serves in about ten seconds. It is
+opt-in rather than part of every push because the image is still 1.7 GB to pull:
 
 ```bash
 export FABRICATE_COSMOS_EMULATOR=1
@@ -49,9 +49,13 @@ dotnet test --filter "FullyQualifiedName~NoSqlEmulatorTests"
 The weekly workflow sets it. With the variable unset, the Cosmos tests print
 `Cosmos DB NOT exercised` and the suite's coverage report names it as not run.
 
-Two connection-string keys exist for reaching an emulator, and both are refused where they would weaken a real
-connection: `ConnectionMode=Gateway` (also the mode to use from behind a restrictive egress policy) and
-`DisableServerCertificateValidation=True`, which is accepted **only** for a loopback endpoint.
+Two connection-string keys exist for reaching an emulator: `ConnectionMode=Gateway` (also the mode to use from
+behind a restrictive egress policy) and `DisableServerCertificateValidation=True`, which is accepted **only** for
+a loopback endpoint, so it cannot weaken a connection to a real account.
+
+The emulator serves plain HTTP unless started with `--protocol https`. Pointing a Cosmos client at `https://`
+without it fails with "the SSL connection could not be established", which reads like a certificate problem and
+is really a protocol mismatch — the suite asks for HTTPS so that the certificate exemption stays under test.
 
 No account is needed for CI. If you want to point the suite at a real account instead, supply a full connection
 string in place of the emulator's.

@@ -174,6 +174,10 @@ public sealed class NoSqlEmulatorTests(NoSqlEmulatorFixture fixture, ITestOutput
         container.DatabaseName.Should().Be(NoSqlEmulatorFixture.CosmosDatabase);
         container.PartitionKey.Should().NotBeNull("every Cosmos container is created with one");
 
+        // Named explicitly, not looped over. This test passed for a while against a discoverer that inferred no
+        // fields at all, because every assertion sat inside a foreach over the empty list it produced (#91).
+        container.Fields.Select(f => f.Name).Should().Contain(["id", "email", "age", "active", "note"]);
+
         foreach (var field in container.Fields) NoSqlProfilerTests.AssertValidFieldDescriptor(field);
     }
 
@@ -491,8 +495,13 @@ public sealed class NoSqlEmulatorFixture : IAsyncLifetime
             //
             // No wait strategy either way: the container reports running long before it accepts a request, so
             // readiness is a real Cosmos call, below.
+            // --protocol https matters: vnext serves plain HTTP unless asked otherwise, and a Cosmos client
+            // pointed at https then fails with "the SSL connection could not be established", which reads like a
+            // certificate problem and is really a protocol mismatch. Asking for HTTPS also keeps the emulator's
+            // self-signed certificate — and so DisableServerCertificateValidation — under test.
             _cosmos = new ContainerBuilder("mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview")
                 .WithPortBinding(8081, assignRandomHostPort: true)
+                .WithCommand("--protocol", "https")
                 .Build();
 
             await _cosmos.StartAsync();

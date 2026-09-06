@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Text.Json;
 using Microsoft.Azure.Cosmos;
 
 namespace Fabricate.Infrastructure.Schema;
@@ -28,7 +29,15 @@ internal static class CosmosConnectionString
 
         var builder = new DbConnectionStringBuilder { ConnectionString = connectionString };
 
-        var options = new CosmosClientOptions { ApplicationName = "Fabricate" };
+        // Both Cosmos adapters read documents as System.Text.Json JsonElement. The SDK's default serializer is
+        // Newtonsoft-based and cannot populate one: it yields JsonValueKind.Undefined rather than failing, so the
+        // discoverer inferred no fields and the profiler produced a collection with the right document count and
+        // no field profiles at all. Nothing caught it because neither adapter had ever read a document (#91).
+        var options = new CosmosClientOptions
+        {
+            ApplicationName = "Fabricate",
+            UseSystemTextJsonSerializerWithOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web),
+        };
 
         if (Take(builder, "ConnectionMode") is { } mode && mode.Equals("gateway", StringComparison.OrdinalIgnoreCase))
         {

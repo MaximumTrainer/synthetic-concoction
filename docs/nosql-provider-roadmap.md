@@ -184,7 +184,7 @@ Each full adapter implementation should:
 
 Every provider runs against a real instance, and none of them needs a cloud account: MongoDB against `mongo:7`,
 DynamoDB against DynamoDB Local, Firestore against the Google Cloud CLI emulator, Cosmos DB against its own
-emulator (opt-in, via `FABRICATE_COSMOS_EMULATOR=1`, because the image is far heavier than the rest).
+emulator (opt-in, via `FABRICATE_COSMOS_EMULATOR=1`, because that image is still the heaviest to pull).
 
 `NoSqlProfilerTests` covers MongoDB and `NoSqlEmulatorTests` covers the other three. All four are seeded with the
 same shaped documents — a field present on one document, explicitly null on a second, absent from a third; a
