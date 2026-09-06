@@ -30,7 +30,9 @@
 <tr><td><code>FABRICATE__BootstrapApiKey</code></td><td>yes, first run</td><td>Seeds a bootstrap account and API key so you can authenticate. Generate with <code>openssl rand -base64 32</code>.</td></tr>
 <tr><td><code>FABRICATE_DB_PROVIDER</code></td><td>yes</td><td><code>postgres</code> for any hosted deployment; <code>sqlite</code> for local experiments; unset = in-memory (state lost on restart).</td></tr>
 <tr><td><code>FABRICATE_CONNECTION_STRING</code></td><td>with <code>postgres</code></td><td>PostgreSQL connection string. Carries credentials — set it as a <strong>secret</strong>.</td></tr>
-<tr><td><code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code></td><td>recommended</td><td>Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances; see <a href="#key-ring">Key ring</a>.</td></tr>
+<tr><td><code>FABRICATE_DATA_PROTECTION_KEY_STORE</code></td><td>no</td><td><code>filesystem</code> (default) or <code>database</code>. See <a href="#key-ring">Key ring</a> — the default is wrong on any platform with an ephemeral disk.</td></tr>
+<tr><td><code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code></td><td>with <code>filesystem</code></td><td>Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances.</td></tr>
+<tr><td><code>FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED</code></td><td>with <code>database</code></td><td>Acknowledges that an unwrapped key ring in the application database means one dump decrypts every tenant secret. Startup is refused without it.</td></tr>
 <tr><td><code>ASPNETCORE_URLS</code></td><td>no</td><td>Defaults to <code>http://+:8080</code> in the image. TLS is terminated by your platform.</td></tr>
 <tr><td><code>FABRICATE_API_RATE_LIMIT_PER_MINUTE</code></td><td>no</td><td>Requests per minute per API key across every authenticated route (default 100). <code>/healthz</code> and Swagger are exempt. Exceeding it returns <code>429</code> with <code>Retry-After</code>.</td></tr>
 <tr><td><code>FABRICATE_ARTIFACTS_PATH</code></td><td>no</td><td>Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart, or use object storage (below).</td></tr>
@@ -144,7 +146,21 @@ curl -s http://localhost:8080/healthz</code></pre>
 <pre><code class="language-bash">fly machine stop; time curl -s -o /dev/null https://&lt;app&gt;.fly.dev/healthz</code></pre>
 <p>Record the number in your runbook and set <code>grace_period</code> in <code>fly.toml</code> a little above it. Expect single-digit seconds for the default image; if it is materially longer, trim the image (ReadyToRun/trimmed publish) rather than raising <code>min_machines_running</code>.</p>
 <h3 id="key-ring">Key ring</h3>
-<p>Per-workspace LLM credentials are encrypted with ASP.NET Core Data Protection. The key ring at <code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code> is what decrypts them: if it is lost, stored credentials are unrecoverable (users re-register them). On Fly's ephemeral disk the checked-in path is fine for a <strong>single-operator instance that uses the platform credential</strong>; before relying on per-workspace credentials in production, move the key ring to shared, persistent storage (a Fly volume on a single machine, or a blob store with an external KMS-wrapped key) — Data Protection supports both.</p>
+<p>Per-workspace LLM credentials and connection secrets are encrypted with ASP.NET Core Data Protection. The key ring is what decrypts them, so where it lives decides two things that are easy to discover too late: whether a replaced machine can still read what its predecessor wrote, and whether two instances can read each other's rows at all.</p>
+<p><code>FABRICATE_DATA_PROTECTION_KEY_STORE</code> chooses:</p>
+<table>
+<thead><tr><th>Value</th><th>Ring lives in</th><th>Use when</th></tr></thead>
+<tbody>
+<tr><td><code>filesystem</code> (default)</td><td><code>FABRICATE_DATA_PROTECTION_KEYS_PATH</code></td><td>The directory is on shared, persistent storage — a mounted volume, one machine.</td></tr>
+<tr><td><code>database</code></td><td>The application database, alongside your other tables</td><td>The disk is ephemeral or unshared: Fly, Cloud Run, Container Apps, ECS, or more than one instance.</td></tr>
+</tbody>
+</table>
+<p><strong>On an ephemeral disk the file-system store loses data permanently.</strong> Not "the instance restarts empty" — the ciphertext survives in the database and nothing can ever decrypt it again, and every user re-registers their credentials. Two instances with separate rings fail the same way in a subtler form: whichever instance serves the request decides whether the credential is readable.</p>
+<p><strong>The database store has a real cost, which is why it is not the default.</strong> The ring ends up in the same database as the ciphertext it protects, so a single database dump decrypts every tenant secret — where the file-system store forces an attacker to obtain two things. It is refused at startup unless you say you accept that:</p>
+<pre><code class="language-bash">FABRICATE_DATA_PROTECTION_KEY_STORE=database
+FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED=true</code></pre>
+<p>Wrapping the ring with an external key-encryption key removes that trade-off, and is tracked by <a href="https://github.com/MaximumTrainer/synthetic-fabricate/issues/76">#76</a>. Until it lands, the honest summary is: <code>filesystem</code> on a mounted volume is the strongest option, <code>database</code> is the one that works on platforms where no such volume exists, and both beat the file-system store on an ephemeral disk, which is the only genuinely unsafe configuration of the three.</p>
+<p>The table is created by the standard migrations, so no manual step is needed when switching.</p>
 <h2 id="alternatives">Alternatives</h2>
 <ul><li><strong>Render</strong> — <code>render.yaml</code> at the repository root is a Blueprint: a Docker web service plus a managed PostgreSQL,</li></ul>
 <p>with secrets prompted in the dashboard.</p>

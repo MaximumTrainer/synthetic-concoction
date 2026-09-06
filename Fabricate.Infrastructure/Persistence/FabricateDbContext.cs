@@ -1,4 +1,5 @@
 using Fabricate.Domain.Models;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
@@ -6,8 +7,22 @@ namespace Fabricate.Infrastructure.Persistence;
 
 // Not sealed: FabricatePostgresDbContext derives from it to own the PostgreSQL migration set. The constructor takes the
 // non-generic options so both the base (SQLite) and the derived context can be constructed from their own options type.
-public class FabricateDbContext(DbContextOptions options) : DbContext(options)
+public class FabricateDbContext(DbContextOptions options) : DbContext(options), IDataProtectionKeyContext
 {
+    /// <summary>
+    /// The Data Protection key ring, when <c>FABRICATE_DATA_PROTECTION_KEY_STORE=database</c> (#76). The table
+    /// exists either way — a migration cannot be conditional — but nothing writes to it under the default
+    /// file-system store.
+    ///
+    /// <para>
+    /// Keys here are wrapped by the configured key-encryption key. Storing an <em>unwrapped</em> ring beside the
+    /// ciphertext it protects would mean a database dump alone decrypts every tenant credential, which is why
+    /// <c>AddFabricateLlm</c> refuses the database store unless a KEK is configured or the operator has
+    /// explicitly accepted that trade-off.
+    /// </para>
+    /// </summary>
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<AccountMembership> AccountMemberships => Set<AccountMembership>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();

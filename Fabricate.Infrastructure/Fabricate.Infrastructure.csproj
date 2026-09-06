@@ -35,6 +35,9 @@
     <PackageReference Include="Anthropic.Vertex" Version="0.5.3" />
     <PackageReference Include="Anthropic.Foundry" Version="0.7.1" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.10" />
+    <!-- #76: the key ring in the application database, so every instance shares one and a replaced machine does
+         not take the ability to decrypt stored credentials with it. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="9.0.10" />
     <!-- GHSA-23rf-6693-g89p et al: DataProtection 9.0.10 pulls System.Security.Cryptography.Xml 9.0.10; pin past the advisories. -->
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
     <PackageReference Include="Google.Cloud.Firestore" Version="3.8.0" />

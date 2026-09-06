@@ -22,6 +22,7 @@ using Fabricate.Infrastructure.Llm;
 using Fabricate.Infrastructure.Repositories;
 using Fabricate.Infrastructure.Schema;
 using Fabricate.Infrastructure.Webhooks;
+using Fabricate.Infrastructure.Persistence;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -268,6 +269,10 @@ public static class ServiceCollectionExtensions
     /// platform credential; an unset <c>FABRICATE_LLM_PROVIDER</c> simply disables the platform credential.
     /// </summary>
     public static IServiceCollection AddFabricateLlm(this IServiceCollection services, LlmOptions options, string? dataProtectionKeyPath = null)
+        => services.AddFabricateLlm(options, new KeyRingOptions { KeysPath = dataProtectionKeyPath });
+
+    public static IServiceCollection AddFabricateLlm(
+        this IServiceCollection services, LlmOptions options, KeyRingOptions dataProtection)
     {
         var errors = options.Validate();
         if (errors.Count > 0)
@@ -275,14 +280,33 @@ public static class ServiceCollectionExtensions
             throw new InvalidOperationException("LLM configuration is invalid:\n - " + string.Join("\n - ", errors));
         }
 
-        services.AddSingleton(options);
-
-        // Tenant secrets are encrypted at rest with Data Protection. The key ring must live outside the
-        // application database so a database dump alone cannot decrypt credentials.
-        var dp = services.AddDataProtection().SetApplicationName("Fabricate");
-        if (!string.IsNullOrWhiteSpace(dataProtectionKeyPath))
+        var keyRingErrors = dataProtection.Validate();
+        if (keyRingErrors.Count > 0)
         {
-            dp.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeyPath));
+            throw new InvalidOperationException(
+                "Data Protection configuration is invalid:" + Environment.NewLine + " - "
+                + string.Join(Environment.NewLine + " - ", keyRingErrors));
+        }
+
+        services.AddSingleton(options);
+        services.AddSingleton(dataProtection);
+
+        // Tenant secrets are encrypted at rest with Data Protection, and the key ring is what decrypts them.
+        //
+        // The file-system store keeps the ring out of the application database, so a database dump alone cannot
+        // decrypt credentials — but on an ephemeral or unshared disk it is lost with the machine, and two
+        // instances never agree on one ring, which is what made the Fly caveat necessary. The database store
+        // fixes both at the cost of putting the ring beside the ciphertext, which KeyRingOptions makes the
+        // operator acknowledge rather than discover (#76).
+        var dp = services.AddDataProtection().SetApplicationName("Fabricate");
+
+        if (dataProtection.UsesDatabase)
+        {
+            dp.PersistKeysToDbContext<FabricateDbContext>();
+        }
+        else if (!string.IsNullOrWhiteSpace(dataProtection.KeysPath))
+        {
+            dp.PersistKeysToFileSystem(new DirectoryInfo(dataProtection.KeysPath));
         }
 
         services.AddHttpClient(ChatCompletionClientFactory.HttpClientName);

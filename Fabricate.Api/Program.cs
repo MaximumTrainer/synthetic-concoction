@@ -3,6 +3,7 @@ using Fabricate.Api.Authentication;
 using Fabricate.Api.Routes;
 using Fabricate.Application.Governance;
 using Fabricate.Application.Llm;
+using Fabricate.Infrastructure.Configuration;
 using Fabricate.Infrastructure.DependencyInjection;
 using Fabricate.Infrastructure.Export;
 using Fabricate.Infrastructure.Persistence;
@@ -99,7 +100,7 @@ builder.Services.AddFabricateInfrastructure(opts =>
 
 // LLM access: FABRICATE_LLM_* configures the operator's platform credential (optional); workspaces may bring their own.
 var llmOptions = LlmOptions.FromEnvironment(Environment.GetEnvironmentVariable);
-builder.Services.AddFabricateLlm(llmOptions, Environment.GetEnvironmentVariable("FABRICATE_DATA_PROTECTION_KEYS_PATH"));
+builder.Services.AddFabricateLlm(llmOptions, KeyRingOptions.FromEnvironment(Environment.GetEnvironmentVariable));
 
 // Durable persistence: FABRICATE_DB_PROVIDER=postgres (hosted deployments) or sqlite (local); unset keeps the
 // in-memory repositories. Registered before the bootstrap service so migrations run before the seed.

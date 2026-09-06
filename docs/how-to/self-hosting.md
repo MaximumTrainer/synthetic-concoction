@@ -16,7 +16,9 @@ Everything is configured by environment variables, so the same image runs unchan
 | `FABRICATE__BootstrapApiKey` | yes, first run | Seeds a bootstrap account and API key so you can authenticate. Generate with `openssl rand -base64 32`. |
 | `FABRICATE_DB_PROVIDER` | yes | `postgres` for any hosted deployment; `sqlite` for local experiments; unset = in-memory (state lost on restart). |
 | `FABRICATE_CONNECTION_STRING` | with `postgres` | PostgreSQL connection string. Carries credentials — set it as a **secret**. |
-| `FABRICATE_DATA_PROTECTION_KEYS_PATH` | recommended | Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances; see [Key ring](#key-ring). |
+| `FABRICATE_DATA_PROTECTION_KEY_STORE` | no | `filesystem` (default) or `database`. See [Key ring](#key-ring) — the default is wrong on any platform with an ephemeral disk. |
+| `FABRICATE_DATA_PROTECTION_KEYS_PATH` | with `filesystem` | Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances. |
+| `FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED` | with `database` | Acknowledges that an unwrapped key ring in the application database means one dump decrypts every tenant secret. Startup is refused without it. |
 | `ASPNETCORE_URLS` | no | Defaults to `http://+:8080` in the image. TLS is terminated by your platform. |
 | `FABRICATE_API_RATE_LIMIT_PER_MINUTE` | no | Requests per minute per API key across every authenticated route (default 100). `/healthz` and Swagger are exempt. Exceeding it returns `429` with `Retry-After`. |
 | `FABRICATE_ARTIFACTS_PATH` | no | Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart, or use object storage (below). |
@@ -228,12 +230,38 @@ for the default image; if it is materially longer, trim the image (ReadyToRun/tr
 
 ### Key ring
 
-Per-workspace LLM credentials are encrypted with ASP.NET Core Data Protection. The key ring at
-`FABRICATE_DATA_PROTECTION_KEYS_PATH` is what decrypts them: if it is lost, stored credentials are unrecoverable (users
-re-register them). On Fly's ephemeral disk the checked-in path is fine for a **single-operator instance that uses the
-platform credential**; before relying on per-workspace credentials in production, move the key ring to shared,
-persistent storage (a Fly volume on a single machine, or a blob store with an external KMS-wrapped key) — Data
-Protection supports both.
+Per-workspace LLM credentials and connection secrets are encrypted with ASP.NET Core Data Protection. The key ring
+is what decrypts them, so where it lives decides two things that are easy to discover too late: whether a replaced
+machine can still read what its predecessor wrote, and whether two instances can read each other's rows at all.
+
+`FABRICATE_DATA_PROTECTION_KEY_STORE` chooses:
+
+| Value | Ring lives in | Use when |
+| --- | --- | --- |
+| `filesystem` (default) | `FABRICATE_DATA_PROTECTION_KEYS_PATH` | The directory is on shared, persistent storage — a mounted volume, one machine. |
+| `database` | The application database, alongside your other tables | The disk is ephemeral or unshared: Fly, Cloud Run, Container Apps, ECS, or more than one instance. |
+
+**On an ephemeral disk the file-system store loses data permanently.** Not "the instance restarts empty" — the
+ciphertext survives in the database and nothing can ever decrypt it again, and every user re-registers their
+credentials. Two instances with separate rings fail the same way in a subtler form: whichever instance serves the
+request decides whether the credential is readable.
+
+**The database store has a real cost, which is why it is not the default.** The ring ends up in the same database
+as the ciphertext it protects, so a single database dump decrypts every tenant secret — where the file-system
+store forces an attacker to obtain two things. It is refused at startup unless you say you accept that:
+
+```bash
+FABRICATE_DATA_PROTECTION_KEY_STORE=database
+FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED=true
+```
+
+Wrapping the ring with an external key-encryption key removes that trade-off, and is tracked by
+[#76](https://github.com/MaximumTrainer/synthetic-fabricate/issues/76). Until it lands, the honest summary is:
+`filesystem` on a mounted volume is the strongest option, `database` is the one that works on platforms where no
+such volume exists, and both beat the file-system store on an ephemeral disk, which is the only genuinely unsafe
+configuration of the three.
+
+The table is created by the standard migrations, so no manual step is needed when switching.
 
 ## Alternatives
 
