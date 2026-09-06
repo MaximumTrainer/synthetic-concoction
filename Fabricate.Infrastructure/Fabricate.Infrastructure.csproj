@@ -21,6 +21,9 @@
 
   <ItemGroup>
     <PackageReference Include="AWSSDK.DynamoDBv2" Version="4.0.103.5" />
+    <!-- #76: envelope-encrypts the Data Protection key ring, so the ring can live in the application database
+         without a dump of that database decrypting every tenant secret. -->
+    <PackageReference Include="AWSSDK.KeyManagementService" Version="4.0.3" />
     <!-- S3-compatible artifact storage (#84): AWS S3, MinIO, Cloudflare R2 and Backblaze B2 all speak this API. -->
     <PackageReference Include="AWSSDK.S3" Version="4.0.6.6" />
     <!-- Native object storage for the other two clouds (#90). S3 covers AWS, MinIO, R2 and B2; these two speak

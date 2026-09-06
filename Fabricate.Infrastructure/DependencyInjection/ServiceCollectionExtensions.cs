@@ -24,6 +24,9 @@ using Fabricate.Infrastructure.Schema;
 using Fabricate.Infrastructure.Webhooks;
 using Fabricate.Infrastructure.Persistence;
 using Microsoft.AspNetCore.DataProtection;
+using Amazon.KeyManagementService;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -307,6 +310,38 @@ public static class ServiceCollectionExtensions
         else if (!string.IsNullOrWhiteSpace(dataProtection.KeysPath))
         {
             dp.PersistKeysToFileSystem(new DirectoryInfo(dataProtection.KeysPath));
+        }
+
+        if (dataProtection.UsesAwsKms)
+        {
+            // The decryptor is resolved by type out of the container when a wrapped element is read back, so both
+            // halves are registered even though only the encryptor is named here.
+            services.TryAddSingleton<IAmazonKeyManagementService>(_ =>
+            {
+                var config = new AmazonKeyManagementServiceConfig();
+                if (!string.IsNullOrWhiteSpace(dataProtection.KmsRegion))
+                {
+                    config.RegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(dataProtection.KmsRegion);
+                }
+
+                if (!string.IsNullOrWhiteSpace(dataProtection.KmsServiceUrl))
+                {
+                    config.ServiceURL = dataProtection.KmsServiceUrl;
+                    config.AuthenticationRegion = dataProtection.KmsRegion ?? "us-east-1";
+                }
+
+                return new AmazonKeyManagementServiceClient(config);
+            });
+
+            services.TryAddSingleton<KmsXmlDecryptor>();
+
+            // Configured through IConfigureOptions rather than services.Configure(...) so the KMS client comes
+            // from the real container when the options are first read. Calling BuildServiceProvider() here would
+            // stand up a second container and a second client, which is the captive-dependency trap from #78.
+            services.AddSingleton<IConfigureOptions<KeyManagementOptions>>(sp =>
+                new ConfigureOptions<KeyManagementOptions>(keyManagement =>
+                    keyManagement.XmlEncryptor = new KmsXmlEncryptor(
+                        sp.GetRequiredService<IAmazonKeyManagementService>(), dataProtection.KmsKeyId!)));
         }
 
         services.AddHttpClient(ChatCompletionClientFactory.HttpClientName);

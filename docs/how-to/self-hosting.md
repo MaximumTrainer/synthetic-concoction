@@ -18,7 +18,10 @@ Everything is configured by environment variables, so the same image runs unchan
 | `FABRICATE_CONNECTION_STRING` | with `postgres` | PostgreSQL connection string. Carries credentials — set it as a **secret**. |
 | `FABRICATE_DATA_PROTECTION_KEY_STORE` | no | `filesystem` (default) or `database`. See [Key ring](#key-ring) — the default is wrong on any platform with an ephemeral disk. |
 | `FABRICATE_DATA_PROTECTION_KEYS_PATH` | with `filesystem` | Directory for the Data Protection key ring that encrypts tenant LLM credentials. Must persist across restarts and be shared across instances. |
-| `FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED` | with `database` | Acknowledges that an unwrapped key ring in the application database means one dump decrypts every tenant secret. Startup is refused without it. |
+| `FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED` | with `database`, no KEK | Acknowledges that an unwrapped key ring in the application database means one dump decrypts every tenant secret. Startup is refused without it. |
+| `FABRICATE_DATA_PROTECTION_KEK` | no | `none` (default) or `aws-kms`. Wraps the key ring with a key-encryption key, which is what makes the `database` store safe. |
+| `FABRICATE_DATA_PROTECTION_KMS_KEY_ID` | with `aws-kms` | KMS key id, ARN or alias. The instance needs `kms:GenerateDataKey` and `kms:Decrypt` on it. |
+| `FABRICATE_DATA_PROTECTION_KMS_REGION` | no | Region for KMS. Falls back to the ambient AWS configuration. |
 | `ASPNETCORE_URLS` | no | Defaults to `http://+:8080` in the image. TLS is terminated by your platform. |
 | `FABRICATE_API_RATE_LIMIT_PER_MINUTE` | no | Requests per minute per API key across every authenticated route (default 100). `/healthz` and Swagger are exempt. Exceeding it returns `429` with `Retry-After`. |
 | `FABRICATE_ARTIFACTS_PATH` | no | Directory for generated artifacts (CSV/JSON/SQL/Parquet). Defaults to the OS temp directory, which is ephemeral on every hosted platform; mount a volume here if artifacts must survive a restart, or use object storage (below). |
@@ -246,20 +249,38 @@ ciphertext survives in the database and nothing can ever decrypt it again, and e
 credentials. Two instances with separate rings fail the same way in a subtler form: whichever instance serves the
 request decides whether the credential is readable.
 
-**The database store has a real cost, which is why it is not the default.** The ring ends up in the same database
-as the ciphertext it protects, so a single database dump decrypts every tenant secret — where the file-system
-store forces an attacker to obtain two things. It is refused at startup unless you say you accept that:
+**On its own, the database store has a real cost.** The ring ends up in the same database as the ciphertext it
+protects, so a single database dump decrypts every tenant secret — where the file-system store forces an attacker
+to obtain two separate things.
+
+**A key-encryption key removes that cost, and is the recommended configuration.** With one, the database holds
+only wrapped keys, and unwrapping them needs a KMS permission a dump does not carry:
+
+```bash
+FABRICATE_DATA_PROTECTION_KEY_STORE=database
+FABRICATE_DATA_PROTECTION_KEK=aws-kms
+FABRICATE_DATA_PROTECTION_KMS_KEY_ID=alias/fabricate-keyring
+FABRICATE_DATA_PROTECTION_KMS_REGION=eu-west-1
+```
+
+The instance needs `kms:GenerateDataKey` and `kms:Decrypt` on that key, and nothing else. Credentials come from
+the standard AWS chain, so an IAM role means no key is stored anywhere. Encryption is enveloped — a data key per
+ring entry, wrapped by the KMS key — because KMS caps direct encryption at 4 KB and a ring entry exceeds it.
+
+Only AWS KMS is implemented. Azure Key Vault and GCP KMS are tracked by
+[#92](https://github.com/MaximumTrainer/synthetic-fabricate/issues/92); neither has an emulator, so neither would
+be verifiable in CI, and shipping an adapter that has never run is how this project got its worst bugs.
+
+**Without a KEK the database store is refused at startup** unless you say you accept the trade-off:
 
 ```bash
 FABRICATE_DATA_PROTECTION_KEY_STORE=database
 FABRICATE_DATA_PROTECTION_ALLOW_UNWRAPPED=true
 ```
 
-Wrapping the ring with an external key-encryption key removes that trade-off, and is tracked by
-[#76](https://github.com/MaximumTrainer/synthetic-fabricate/issues/76). Until it lands, the honest summary is:
-`filesystem` on a mounted volume is the strongest option, `database` is the one that works on platforms where no
-such volume exists, and both beat the file-system store on an ephemeral disk, which is the only genuinely unsafe
-configuration of the three.
+In order of strength: `database` with a KEK, then `filesystem` on a mounted volume, then `database` unwrapped.
+The file-system store on an ephemeral disk is not on the list because it is not a configuration, it is a
+countdown.
 
 The table is created by the standard migrations, so no manual step is needed when switching.
 
